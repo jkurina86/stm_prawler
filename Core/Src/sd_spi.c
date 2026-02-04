@@ -86,15 +86,23 @@ BYTE CardType;			/* Card type flags */
 uint32_t spiTimerTickStart;
 uint32_t spiTimerTickDelay;
 
-/* BEGIN SPI DMA CODE (TX only - RX uses blocking) */
+/* BEGIN SPI DMA CODE */
 
-/* ---- SPI TX DMA completion flag ---- */
+/* ---- SPI DMA completion flags ---- */
 static volatile bool spi_tx_done = false;
+static volatile bool spi_rx_done = false;
 
 /* HAL DMA completion callback for TX */
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
     if (hspi == &SD_SPI_HANDLE) {
 		spi_tx_done = true;
+	}
+}
+
+/* HAL DMA completion callback for RX */
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
+    if (hspi == &SD_SPI_HANDLE) {
+		spi_rx_done = true;
 	}
 }
 
@@ -136,15 +144,21 @@ BYTE xchg_spi (
 }
 
 
-/* Receive multiple byte (blocking) */
+/* Receive multiple byte via DMA */
 static
 void rcvr_spi_multi (
 	BYTE *buff,		/* Pointer to data buffer */
 	UINT btr		/* Number of bytes to receive (even number) */
 )
 {
-	/* Blocking SPI receive - timeout 1 second for slow SD cards */
-	HAL_SPI_Receive(&SD_SPI_HANDLE, buff, btr, 1000);
+	spi_rx_done = false;
+	if (HAL_SPI_Receive_DMA(&SD_SPI_HANDLE, buff, btr) != HAL_OK) {
+		return;
+	}
+	/* Wait up to 1 second - extreme case for a very slow SD card */
+	if (!wait_flag(&spi_rx_done, 1000)) {
+		/* Handle error */
+	}
 }
 
 

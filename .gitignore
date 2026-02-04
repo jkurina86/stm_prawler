@@ -1,0 +1,95 @@
+# Debug folder and build artifacts
+Debug/
+Release/
+
+# Object files
+*.o
+*.obj
+*.elf
+*.map
+*.list
+*.su
+*.cyclo
+*.d
+
+# Build directories
+build/
+Build/
+
+# IDE specific files
+.metadata/
+.recommenders/
+.settings/
+.project
+.cproject
+.launches/
+*.launch
+
+# STM32CubeIDE specific
+*.elf.launch
+*.cfg
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Backup files
+*.bak
+*.backup
+
+# Core dumps
+core.*
+
+# Generated files
+*.bin
+*.hex
+*.srec
+
+# Dependencies
+*.dep
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# Visual Studio Code
+.vscode/
+
+# Eclipse CDT
+.autotools
+.cproject
+.project
+.pydevproject
+.settings/
+
+# ST-LINK
+STLinkLog.txt
+
+# Misc.
+.zed/
+.github/
+CLAUDE*
+log.txt
+vnsdk/
+nul
+matlab/
+logs/
+tmpc*
+reports.csv
