@@ -84,6 +84,7 @@ STLinkLog.txt
 
 # Misc.
 .zed/
+.claude*
 .github/
 CLAUDE*
 log.txt
@@ -93,3 +94,4 @@ matlab/
 logs/
 tmpc*
 reports.csv
+.clau*

@@ -44,7 +44,13 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    Core/Src/shell.c
+    Core/Src/filesystem.c
+    Core/Src/ab-rtcmc-rtc.c
+    Core/Src/tasker.c
+    Core/Src/task_handlers.c
+    Core/Src/sd_spi.c
+    Core/Src/ctd.c
 )
 
 # Add include paths

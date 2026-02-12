@@ -22,7 +22,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "tasker.h"
+#include "shell.h"
+#include "filesystem.h"
+#include "ab-rtcmc-rtc.h"
+#include "ctd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -85,7 +89,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_RTC_Init(void);
 /* USER CODE BEGIN PFP */
-
+void transceiver_init(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -138,6 +142,22 @@ int main(void)
   MX_RTC_Init();
   /* USER CODE BEGIN 2 */
 
+  shell_printf("System Initialization...\r\n");
+
+  /* Turn on SD card power */
+  HAL_GPIO_WritePin(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
+  HAL_Delay(50);
+
+
+
+  transceiver_init();
+  tasker_init();
+  filesystem_init();
+  RTC_Init();
+  ctd_init(&huart3);
+  shell_init();
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -147,6 +167,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    shell_task();
+    tasker_run();
   }
   /* USER CODE END 3 */
 }
@@ -638,7 +660,7 @@ static void MX_UART5_Init(void)
 
   /* USER CODE END UART5_Init 1 */
   huart5.Instance = UART5;
-  huart5.Init.BaudRate = 57600;
+  huart5.Init.BaudRate = 9600;
   huart5.Init.WordLength = UART_WORDLENGTH_8B;
   huart5.Init.StopBits = UART_STOPBITS_1;
   huart5.Init.Parity = UART_PARITY_NONE;
@@ -743,7 +765,7 @@ static void MX_USART3_UART_Init(void)
 
   /* USER CODE END USART3_Init 1 */
   huart3.Instance = USART3;
-  huart3.Init.BaudRate = 115200;
+  huart3.Init.BaudRate = 9600;
   huart3.Init.WordLength = UART_WORDLENGTH_8B;
   huart3.Init.StopBits = UART_STOPBITS_1;
   huart3.Init.Parity = UART_PARITY_NONE;
@@ -894,6 +916,22 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/** @brief  Initialize GPIO pins enable RS232 Transceivers
+  * @param  None
+  * @retval None
+  */
+void transceiver_init(void) {
+  /* Set PB1 GPIO high - ENABLE pin for USART2 RS232 transceiver */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+
+  /* Set PB0 GPIO high - ENABLE pin for the USART3 RS232 transceiver */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+
+  /* Set PB4 GPIO high and PB5 GPIO low to enable the UART5 RS232 transceiver */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
+}
 
 /* USER CODE END 4 */
 

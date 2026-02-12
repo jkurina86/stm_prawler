@@ -18,7 +18,11 @@
 #ifndef _USER_DISKIO_SPI_H
 #define _USER_DISKIO_SPI_H
 
+#include "stm32l4xx_hal.h"
 #include "integer.h" //from FatFs middleware library
+
+/* SD card SPI handle - SPI1 is connected to the SD card */
+#define SD_SPI_HANDLE hspi1
 #include "diskio.h" //from FatFs middleware library
 #include "ff_gen_drv.h" //from FatFs middleware library
 

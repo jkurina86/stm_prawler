@@ -22,6 +22,7 @@
 #include "stm32l4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "shell.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -437,5 +438,10 @@ void DMA2_Channel4_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1) {
+        shell_uart_receive_callback();
+    }
+}
 /* USER CODE END 1 */
