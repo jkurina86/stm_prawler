@@ -28,6 +28,10 @@ extern UART_HandleTypeDef huart5;
 
 /* General Handlers -------------------------------------------------------*/
 
+/** @brief  Handle the "help" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_help(const void *arg)
 {
     (void)arg;
@@ -38,12 +42,20 @@ void handle_help(const void *arg)
     }
 }
 
+/** @brief  Handle the "clear" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_clear(const void *arg)
 {
     (void)arg;
     shell_print("\033[2J\033[H"); /* ANSI clear screen + cursor home */
 }
 
+/** @brief  Handle the "status" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_status(const void *arg)
 {
     (void)arg;
@@ -52,6 +64,10 @@ void handle_status(const void *arg)
     shell_printf("FS mounted:    %s\r\n", filesystem_is_mounted() ? "yes" : "no");
 }
 
+/** @brief  Handle the "reset" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_reset(const void *arg)
 {
     const reset_args_t *a = (const reset_args_t *)arg;
@@ -65,12 +81,20 @@ void handle_reset(const void *arg)
     NVIC_SystemReset();
 }
 
+/** @brief  Handle the "version" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_version(const void *arg)
 {
     (void)arg;
     shell_printf("Firmware version: %s\r\n", FW_VERSION);
 }
 
+/** @brief  Handle the "systime" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_systime(const void *arg)
 {
     (void)arg;
@@ -82,6 +106,10 @@ void handle_systime(const void *arg)
                  tick, hrs, min % 60, sec % 60);
 }
 
+/** @brief  Handle the "hello" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_hello(const void *arg)
 {
     const hello_args_t *a = (const hello_args_t *)arg;
@@ -105,6 +133,10 @@ void handle_hello(const void *arg)
 
 /* RTC Handlers -----------------------------------------------------------*/
 
+/** @brief  Handle the "rtc-settime" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_rtc_settime(const void *arg)
 {
     const rtc_settime_args_t *a = (const rtc_settime_args_t *)arg;
@@ -134,6 +166,10 @@ void handle_rtc_settime(const void *arg)
     }
 }
 
+/** @brief  Handle the "rtc-gettime" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_rtc_gettime(const void *arg)
 {
     (void)arg;
@@ -149,6 +185,10 @@ void handle_rtc_gettime(const void *arg)
     }
 }
 
+/** @brief  Handle the "rtc-temp" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_rtc_temp(const void *arg)
 {
     (void)arg;
@@ -162,6 +202,10 @@ void handle_rtc_temp(const void *arg)
     }
 }
 
+/** @brief  Handle the "rtc-timer-set" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_rtc_timer_set(const void *arg)
 {
     const rtc_timer_set_args_t *a = (const rtc_timer_set_args_t *)arg;
@@ -189,6 +233,10 @@ void handle_rtc_timer_set(const void *arg)
     }
 }
 
+/** @brief  Handle the "rtc-timer-stop" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_rtc_timer_stop(const void *arg)
 {
     (void)arg;
@@ -208,6 +256,10 @@ void handle_rtc_timer_stop(const void *arg)
     }
 }
 
+/** @brief  Handle RTC timer status
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_rtc_timer_status(const void *arg)
 {
     (void)arg;
@@ -228,14 +280,30 @@ void handle_rtc_timer_status(const void *arg)
 
 /* CTD Handlers -----------------------------------------------------------*/
 
+/** @brief  Handle CTD sensor readings
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_ctd(const void *arg)
 {
     (void)arg;
-    ctd_ts(shell_print);
+    ctd_data_t data;
+    if (ctd_ts(&data)) {
+        shell_print("\nCTD Sensor Readings:\r\n");
+        shell_printf("Conductivity: %.4f\n", data.conductivity);
+        shell_printf("Temperature:  %.4f\n", data.temperature);
+        shell_printf("Pressure:     %.5f\r\n", data.pressure);
+    } else {
+        shell_printf("\nCTD read failed\r\n");
+    }
 }
 
 /* File System Handlers ---------------------------------------------------*/
 
+/** @brief  Handle the "fs-mount" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_mount(const void *arg)
 {
     (void)arg;
@@ -253,6 +321,10 @@ void handle_fs_mount(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-unmount" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_unmount(const void *arg)
 {
     (void)arg;
@@ -270,6 +342,10 @@ void handle_fs_unmount(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-df" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_df(const void *arg)
 {
     (void)arg;
@@ -287,6 +363,10 @@ void handle_fs_df(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-ls" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_ls(const void *arg)
 {
     (void)arg;
@@ -298,6 +378,10 @@ void handle_fs_ls(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-cat" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_cat(const void *arg)
 {
     (void)arg;
@@ -319,6 +403,10 @@ void handle_fs_cat(const void *arg)
     shell_print("\r\n");
 }
 
+/** @brief  Handle the "fs-write" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_write(const void *arg)
 {
     (void)arg;
@@ -339,6 +427,10 @@ void handle_fs_write(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-rm" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_rm(const void *arg)
 {
     (void)arg;
@@ -361,6 +453,10 @@ void handle_fs_rm(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-mkdir" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_mkdir(const void *arg)
 {
     (void)arg;
@@ -381,6 +477,10 @@ void handle_fs_mkdir(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-rmdir" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_rmdir(const void *arg)
 {
     (void)arg;
@@ -401,6 +501,10 @@ void handle_fs_rmdir(const void *arg)
     }
 }
 
+/** @brief  Handle the "fs-cp" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
 void handle_fs_cp(const void *arg)
 {
     (void)arg;

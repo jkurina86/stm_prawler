@@ -17,9 +17,16 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Data types ----------------------------------------------------------------*/
+typedef struct {
+    float conductivity;
+    float temperature;
+    float pressure;
+} ctd_data_t;
+
 /* Function prototypes -------------------------------------------------------*/
 void ctd_init(UART_HandleTypeDef *huart);
-bool ctd_ts(void (*print)(const char *));
+bool ctd_ts(ctd_data_t *out);
 
 #ifdef __cplusplus
 }
