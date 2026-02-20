@@ -1,12 +1,12 @@
 /**
   ******************************************************************************
-  * @file    ctd.h
-  * @brief   Driver for the CTD sensor
+  * @file    optode.h
+  * @brief   Driver for the Optode sensor
   * @note    This driver uses the STM32 HAL library for UART communication.
   ******************************************************************************
   */
-#ifndef __CTD_H__
-#define __CTD_H__
+#ifndef __OPTODE_H__
+#define __OPTODE_H__
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,22 +17,17 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Data types ----------------------------------------------------------------*/
-typedef struct {
-    float conductivity;
-    float temperature;
-    float pressure;
-} ctd_data_t;
-
 /* Function prototypes -------------------------------------------------------*/
-void ctd_init(UART_HandleTypeDef *huart);
-bool ctd_ts(ctd_data_t *out);
+void optode_init(UART_HandleTypeDef *huart);
+bool optode_sample(char *buf, uint16_t buf_size);
+void optode_listen(void);
+void optode_setup(void);
 
 /* Callback notify functions (called from centralized HAL callbacks) */
-void ctd_notify_tx_cplt(void);
-void ctd_notify_rx_event(uint16_t size);
+void optode_notify_tx_cplt(void);
+void optode_notify_rx_event(uint16_t size);
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* __CTD_H__ */
+#endif /* __OPTODE_H__ */

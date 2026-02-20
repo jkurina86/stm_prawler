@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/task_handlers.c
     Core/Src/sd_spi.c
     Core/Src/ctd.c
+    Core/Src/optode.c
 )
 
 # Add include paths

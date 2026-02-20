@@ -18,20 +18,17 @@ static volatile bool rx_done = false;
 static volatile uint16_t rx_len = 0;
 static uint8_t rx_buf[1024];
 
-/* HAL DMA callbacks ---------------------------------------------------------*/
+/* Callback notify functions (called from centralized HAL callbacks) ----------*/
 
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+void ctd_notify_tx_cplt(void)
 {
-    if (huart->Instance == ctd_huart->Instance)
-        tx_done = true;
+    tx_done = true;
 }
 
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+void ctd_notify_rx_event(uint16_t size)
 {
-    if (huart->Instance == ctd_huart->Instance) {
-        rx_len = Size;
-        rx_done = true;
-    }
+    rx_len = size;
+    rx_done = true;
 }
 
 /* Public functions ----------------------------------------------------------*/

@@ -69,6 +69,11 @@ void cmd_rtc_timer_status(int argc, char **argv);
 /* CTD Command functions */
 void cmd_ctd(int argc, char **argv);
 
+/* Optode Command functions */
+void cmd_optode(int argc, char **argv);
+void cmd_optode_listen(int argc, char **argv);
+void cmd_optode_setup(int argc, char **argv);
+
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);
 void cmd_fs_unmount(int argc, char **argv);

@@ -14,6 +14,7 @@
 #include "filesystem.h"
 #include "ab-rtcmc-rtc.h"
 #include "ctd.h"
+#include "optode.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -296,6 +297,30 @@ void handle_ctd(const void *arg)
     } else {
         shell_printf("\nCTD read failed\r\n");
     }
+}
+
+/* Optode Handlers --------------------------------------------------------*/
+
+void handle_optode(const void *arg)
+{
+    (void)arg;
+    char buf[1024];
+    if (optode_sample(buf, sizeof(buf)))
+        shell_printf("\n%s\r\n", buf);
+    else
+        shell_printf("\nOptode read failed\r\n");
+}
+
+void handle_optode_listen(const void *arg)
+{
+    (void)arg;
+    optode_listen();
+}
+
+void handle_optode_setup(const void *arg)
+{
+    (void)arg;
+    optode_setup();
 }
 
 /* File System Handlers ---------------------------------------------------*/

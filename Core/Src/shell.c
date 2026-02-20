@@ -66,6 +66,11 @@ const shell_command_t shell_commands[] = {
     /* CTD Commands */
     {"ctd", "Get CTD configuration data", cmd_ctd},
 
+    /* Optode Commands */
+    {"optode", "Get Optode sensor data", cmd_optode},
+    {"optode-listen", "Power-cycle optode and listen", cmd_optode_listen},
+    {"optode-setup", "Set optode to 9600 baud + terminal mode", cmd_optode_setup},
+
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
     {"fs-unmount", "Unmount the file system", cmd_fs_unmount},
@@ -637,6 +642,26 @@ void cmd_ctd(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_ctd, NULL, 0);
+}
+
+/* Optode Commands ------------------------------------------------*/
+
+void cmd_optode(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_optode, NULL, 0);
+}
+
+void cmd_optode_listen(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_optode_listen, NULL, 0);
+}
+
+void cmd_optode_setup(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_optode_setup, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/
