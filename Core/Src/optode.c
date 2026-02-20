@@ -88,7 +88,11 @@ static bool optode_tx(const uint8_t *data, uint16_t len)
     return true;
 }
 
-bool optode_sample(char *buf, uint16_t buf_size)
+/**
+ * @brief  Send preamble + command once and collect until '#' or '*'.
+ * @return Number of bytes in rx_buf, or 0 on failure.
+ */
+static uint16_t optode_send_sample(bool with_preamble)
 {
     const char *cmd = "do sample\r\n";
     uint32_t t0;
@@ -96,29 +100,22 @@ bool optode_sample(char *buf, uint16_t buf_size)
 
     optode_reset_uart();
 
-    /* Arm RX DMA before any TX so we don't miss data */
     if (!optode_arm_rx(rx_buf, sizeof(rx_buf) - 1))
-        return false;
+        return 0;
 
-    /*
-     * Send the wake preamble (120 '/' + CRLF) followed immediately by
-     * the command.  The '/' characters wake the sensor from Communication
-     * Sleep; the line is a comment so the sensor produces no response.
-     * At 9600 baud each byte takes ~1 ms, giving the sensor >120 ms to
-     * wake (datasheet says <100 ms).
-     */
-    if (!optode_tx((const uint8_t *)wake_preamble, sizeof(wake_preamble) - 1)) {
-        HAL_UART_Abort(optode_huart);
-        return false;
+    if (with_preamble) {
+        if (!optode_tx((const uint8_t *)wake_preamble,
+                       sizeof(wake_preamble) - 1)) {
+            HAL_UART_Abort(optode_huart);
+            return 0;
+        }
     }
 
-    /* Send command immediately — no delay, sensor is awake */
     if (!optode_tx((const uint8_t *)cmd, strlen(cmd))) {
         HAL_UART_Abort(optode_huart);
-        return false;
+        return 0;
     }
 
-    /* Collect response until '#' or '*' prompt, or 10-s timeout */
     t0 = HAL_GetTick();
     while ((HAL_GetTick() - t0) < 10000 && total < sizeof(rx_buf) - 1) {
         if (rx_done) {
@@ -138,10 +135,25 @@ bool optode_sample(char *buf, uint16_t buf_size)
     }
     HAL_UART_AbortReceive(optode_huart);
 
+    rx_buf[total] = '\0';
+    return total;
+}
+
+bool optode_sample(char *buf, uint16_t buf_size)
+{
+    /* First attempt: preamble wakes sensor from Communication Sleep */
+    uint16_t total = optode_send_sample(true);
+
+    /*
+     * If the sensor's UART was unsynchronized on wake, it returns
+     * '* ERROR SYNTAX ERROR' from garbled preamble bytes.  The sensor
+     * is now awake, so retry the command without the preamble.
+     */
+    if (total > 0 && memchr(rx_buf, '*', total) && !memchr(rx_buf, '#', total))
+        total = optode_send_sample(false);
+
     if (total == 0)
         return false;
-
-    rx_buf[total] = '\0';
 
     uint16_t copy_len = total < (buf_size - 1) ? total : (buf_size - 1);
     memcpy(buf, rx_buf, copy_len);
