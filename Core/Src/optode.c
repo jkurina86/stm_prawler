@@ -10,6 +10,7 @@
 #include "optode.h"
 #include "shell.h"
 #include <string.h>
+#include <stdlib.h>
 
 /* Private variables ---------------------------------------------------------*/
 static UART_HandleTypeDef *optode_huart;
@@ -139,7 +140,52 @@ static uint16_t optode_send_sample(bool with_preamble)
     return total;
 }
 
-bool optode_sample(char *buf, uint16_t buf_size)
+/**
+ * @brief  Parse a tab-separated measurement line into an optode_data_t.
+ *
+ * Current sensor config (Enable AirSaturation=No, Enable Rawdata=Yes):
+ *   4330\t1638\tO2Conc\tTemp\tCalPhase\tTCPhase\tC1RPh\tC2RPh\tC1Amp\tC2Amp\tRawTemp
+ * With Enable Text=No the labels are omitted; field order is the same.
+ *
+ * Strategy: first two tab tokens are product/serial (integers).
+ * Remaining tokens: try strtof(); skip text labels (endptr == token).
+ * Assign first two successful floats to O2 concentration and temperature.
+ */
+static bool optode_parse(char *line, optode_data_t *out)
+{
+    char *tok = strtok(line, "\t");
+    if (!tok) return false;
+    out->product_no = (uint16_t)strtoul(tok, NULL, 10);
+
+    tok = strtok(NULL, "\t");
+    if (!tok) return false;
+    out->serial_no = (uint16_t)strtoul(tok, NULL, 10);
+
+    int idx = 0;
+    float vals[9];
+    while ((tok = strtok(NULL, "\t")) != NULL && idx < 9) {
+        char *end;
+        float v = strtof(tok, &end);
+        if (end == tok)
+            continue;   /* text label — skip */
+        vals[idx++] = v;
+    }
+    if (idx < 9)
+        return false;
+
+    out->o2_concentration = vals[0];
+    out->temperature      = vals[1];
+    out->cal_phase        = vals[2];
+    out->tc_phase         = vals[3];
+    out->c1_rph           = vals[4];
+    out->c2_rph           = vals[5];
+    out->c1_amp           = vals[6];
+    out->c2_amp           = vals[7];
+    out->raw_temp         = vals[8];
+    return true;
+}
+
+bool optode_sample(optode_data_t *out)
 {
     /* First attempt: preamble wakes sensor from Communication Sleep */
     uint16_t total = optode_send_sample(true);
@@ -155,11 +201,14 @@ bool optode_sample(char *buf, uint16_t buf_size)
     if (total == 0)
         return false;
 
-    uint16_t copy_len = total < (buf_size - 1) ? total : (buf_size - 1);
-    memcpy(buf, rx_buf, copy_len);
-    buf[copy_len] = '\0';
+    /* Find the first digit in the buffer (start of product number) */
+    char *p = (char *)rx_buf;
+    while (*p && (*p < '0' || *p > '9'))
+        p++;
+    if (!*p)
+        return false;
 
-    return true;
+    return optode_parse(p, out);
 }
 
 /**

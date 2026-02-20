@@ -304,11 +304,21 @@ void handle_ctd(const void *arg)
 void handle_optode(const void *arg)
 {
     (void)arg;
-    char buf[1024];
-    if (optode_sample(buf, sizeof(buf)))
-        shell_printf("\n%s\r\n", buf);
-    else
+    optode_data_t data;
+    if (optode_sample(&data)) {
+        shell_printf("\nOptode %u (S/N %u):\r\n", data.product_no, data.serial_no);
+        shell_printf("O2 Concentration: %.3f uM\r\n", data.o2_concentration);
+        shell_printf("Temperature:      %.3f C\r\n", data.temperature);
+        shell_printf("CalPhase:         %.3f deg\r\n", data.cal_phase);
+        shell_printf("TCPhase:          %.3f deg\r\n", data.tc_phase);
+        shell_printf("C1RPh:            %.3f deg\r\n", data.c1_rph);
+        shell_printf("C2RPh:            %.3f deg\r\n", data.c2_rph);
+        shell_printf("C1Amp:            %.1f mV\r\n", data.c1_amp);
+        shell_printf("C2Amp:            %.1f mV\r\n", data.c2_amp);
+        shell_printf("RawTemp:          %.1f mV\r\n", data.raw_temp);
+    } else {
         shell_printf("\nOptode read failed\r\n");
+    }
 }
 
 void handle_optode_listen(const void *arg)

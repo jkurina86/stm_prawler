@@ -17,9 +17,24 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Exported types ------------------------------------------------------------*/
+typedef struct {
+    uint16_t product_no;
+    uint16_t serial_no;
+    float o2_concentration;  /* uM */
+    float temperature;       /* deg C */
+    float cal_phase;         /* deg */
+    float tc_phase;          /* deg */
+    float c1_rph;            /* deg — blue excitation phase */
+    float c2_rph;            /* deg — red excitation phase */
+    float c1_amp;            /* mV  — blue excitation amplitude */
+    float c2_amp;            /* mV  — red excitation amplitude */
+    float raw_temp;          /* mV  — thermistor bridge voltage */
+} optode_data_t;
+
 /* Function prototypes -------------------------------------------------------*/
 void optode_init(UART_HandleTypeDef *huart);
-bool optode_sample(char *buf, uint16_t buf_size);
+bool optode_sample(optode_data_t *out);
 void optode_listen(void);
 void optode_setup(void);
 
