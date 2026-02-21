@@ -73,6 +73,7 @@ void DMA2_Channel1_IRQHandler(void);
 void DMA2_Channel2_IRQHandler(void);
 void DMA2_Channel3_IRQHandler(void);
 void DMA2_Channel4_IRQHandler(void);
+void DMA2_Channel5_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
