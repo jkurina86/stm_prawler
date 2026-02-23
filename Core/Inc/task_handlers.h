@@ -66,6 +66,9 @@ void handle_optode(const void *arg);
 void handle_optode_listen(const void *arg);
 void handle_optode_setup(const void *arg);
 
+/* WetLab */
+void handle_wetlab(const void *arg);
+
 /* File System */
 void handle_fs_mount(const void *arg);
 void handle_fs_unmount(const void *arg);

@@ -74,6 +74,9 @@ void cmd_optode(int argc, char **argv);
 void cmd_optode_listen(int argc, char **argv);
 void cmd_optode_setup(int argc, char **argv);
 
+/* WetLab Command functions */
+void cmd_wetlab(int argc, char **argv);
+
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);
 void cmd_fs_unmount(int argc, char **argv);

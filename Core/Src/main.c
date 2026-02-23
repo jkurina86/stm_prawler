@@ -28,6 +28,7 @@
 #include "ab-rtcmc-rtc.h"
 #include "ctd.h"
 #include "optode.h"
+#include "wetlab.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -160,6 +161,7 @@ int main(void)
   RTC_Init();
   ctd_init(&huart3);
   optode_init(&huart2);
+  wetlab_init(&huart5);
   shell_init();
 
 
@@ -943,7 +945,10 @@ void transceiver_init(void) {
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
   /* Set PB4 GPIO high and PB5 GPIO low to enable the UART5 RS232 transceiver */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+  /* Keep PB4 and PB5 low to disable the UART5 RS232 transceiver */
+  /* Wetlab toggles PB4 to take a sample */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
 }
 

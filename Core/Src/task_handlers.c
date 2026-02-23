@@ -15,6 +15,7 @@
 #include "ab-rtcmc-rtc.h"
 #include "ctd.h"
 #include "optode.h"
+#include "wetlab.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -331,6 +332,26 @@ void handle_optode_setup(const void *arg)
 {
     (void)arg;
     optode_setup();
+}
+
+/* WetLab Handlers --------------------------------------------------------*/
+
+void handle_wetlab(const void *arg)
+{
+    (void)arg;
+    wetlab_data_t data;
+    if (wetlab_sample(&data)) {
+        shell_printf("\nWetLab %02u/%02u/%02u %02u:%02u:%02u:\r\n",
+                     data.month, data.day, data.year,
+                     data.hour, data.minute, data.second);
+        shell_printf("  CHL:        %u @ %u nm\r\n",
+                     data.chl_signal, data.chl_lambda);
+        shell_printf("  NTU:        %u @ %u nm\r\n",
+                     data.ntu_signal, data.ntu_lambda);
+        shell_printf("  Thermistor: %u\r\n", data.thermistor);
+    } else {
+        shell_printf("\nWetLab read failed\r\n");
+    }
 }
 
 /* File System Handlers ---------------------------------------------------*/

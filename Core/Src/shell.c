@@ -71,6 +71,8 @@ const shell_command_t shell_commands[] = {
     {"optode-listen", "Power-cycle optode and listen", cmd_optode_listen},
     {"optode-setup", "Set optode to 9600 baud + terminal mode", cmd_optode_setup},
 
+    /* WetLab Commands */
+    {"wetlab", "Get WetLab sensor data", cmd_wetlab},
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
     {"fs-unmount", "Unmount the file system", cmd_fs_unmount},
@@ -662,6 +664,14 @@ void cmd_optode_setup(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_optode_setup, NULL, 0);
+}
+
+/* WetLab Commands ------------------------------------------------*/
+
+void cmd_wetlab(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_wetlab, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/

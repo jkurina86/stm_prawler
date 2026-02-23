@@ -25,6 +25,7 @@
 #include "shell.h"
 #include "ctd.h"
 #include "optode.h"
+#include "wetlab.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -498,6 +499,8 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
         ctd_notify_tx_cplt();
     else if (huart->Instance == USART2)
         optode_notify_tx_cplt();
+    else if (huart->Instance == UART5)
+        wetlab_notify_tx_cplt();
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
@@ -506,5 +509,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
         ctd_notify_rx_event(Size);
     else if (huart->Instance == USART2)
         optode_notify_rx_event(Size);
+    else if (huart->Instance == UART5)
+        wetlab_notify_rx_event(Size);
 }
 /* USER CODE END 1 */
