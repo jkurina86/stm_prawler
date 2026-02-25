@@ -211,6 +211,94 @@ bool optode_sample(optode_data_t *out)
     return optode_parse(p, out);
 }
 
+/* Split-phase API for simultaneous sampling --------------------------------*/
+
+void optode_wake(void)
+{
+    const uint16_t buf_size = sizeof(rx_buf) - 1;
+
+    optode_reset_uart();
+
+    /* Arm RX DMA in polling mode */
+    if (HAL_UART_Receive_DMA(optode_huart, rx_buf, buf_size) != HAL_OK)
+        return;
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(optode_huart->Instance->CR3, USART_CR3_EIE);
+
+    /* TX wake preamble */
+    tx_done = false;
+    if (HAL_UART_Transmit_DMA(optode_huart,
+                               (uint8_t *)wake_preamble,
+                               sizeof(wake_preamble) - 1) != HAL_OK) {
+        HAL_UART_Abort(optode_huart);
+        return;
+    }
+    uint32_t t0 = HAL_GetTick();
+    while (!tx_done) {
+        if ((HAL_GetTick() - t0) > 2000) {
+            HAL_UART_Abort(optode_huart);
+            return;
+        }
+    }
+
+    /* Wait up to 500 ms for any error response, then discard */
+    HAL_Delay(500);
+    HAL_UART_AbortReceive(optode_huart);
+}
+
+bool optode_fire(void)
+{
+    const char *cmd = "do sample\r\n";
+    const uint16_t buf_size = sizeof(rx_buf) - 1;
+
+    optode_reset_uart();
+
+    /* Start continuous RX DMA — poll NDTR, no callbacks */
+    if (HAL_UART_Receive_DMA(optode_huart, rx_buf, buf_size) != HAL_OK)
+        return false;
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(optode_huart->Instance->CR3, USART_CR3_EIE);
+
+    /* TX command via DMA */
+    tx_done = false;
+    if (HAL_UART_Transmit_DMA(optode_huart,
+                               (uint8_t *)cmd, strlen(cmd)) != HAL_OK) {
+        HAL_UART_AbortReceive(optode_huart);
+        return false;
+    }
+    uint32_t t0 = HAL_GetTick();
+    while (!tx_done) {
+        if ((HAL_GetTick() - t0) > 2000) {
+            HAL_UART_Abort(optode_huart);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool optode_collect(optode_data_t *out)
+{
+    const uint16_t buf_size = sizeof(rx_buf) - 1;
+    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
+    HAL_UART_AbortReceive(optode_huart);
+
+    if (total == 0)
+        return false;
+
+    rx_buf[total] = '\0';
+
+    /* Find the first digit in the buffer (start of product number) */
+    char *p = (char *)rx_buf;
+    while (*p && (*p < '0' || *p > '9'))
+        p++;
+    if (!*p)
+        return false;
+
+    return optode_parse(p, out);
+}
+
 /**
  * @brief  Send a command string and wait for '#' (OK) or '*' (error).
  * @return true if '#' was received, false on '*' or timeout.

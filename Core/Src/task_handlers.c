@@ -354,6 +354,90 @@ void handle_wetlab(const void *arg)
     }
 }
 
+/* Simultaneous Sampling --------------------------------------------------*/
+
+void handle_sensors(const void *arg)
+{
+    (void)arg;
+    ctd_data_t ctd = {0};
+    optode_data_t optode = {0};
+    wetlab_data_t wetlab = {0};
+    bool ctd_ok = false, optode_ok = false, wetlab_ok = false;
+
+    shell_print("[sensors] Waking sensors...\r\n");
+
+    /* 1. Wake optode (absorb any error from sleep) */
+    optode_wake();
+
+    /* 2. Wake CTD */
+    if (!ctd_wakeup())
+        shell_print("[sensors] CTD wakeup failed\r\n");
+
+    /* 3. Capture t0 */
+    uint32_t t0 = HAL_GetTick();
+
+    /* 4. Power on WetLab */
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+
+    /* 5. Fire CTD */
+    if (!ctd_fire())
+        shell_print("[sensors] CTD fire failed\r\n");
+
+    /* 6. Fire Optode */
+    if (!optode_fire())
+        shell_print("[sensors] Optode fire failed\r\n");
+
+    /* 7. Pad to 100 ms from PB4 HIGH for line settle */
+    uint32_t elapsed = HAL_GetTick() - t0;
+    if (elapsed < 100)
+        HAL_Delay(100 - elapsed);
+
+    /* 8. Fire WetLab */
+    if (!wetlab_fire())
+        shell_print("[sensors] WetLab fire failed\r\n");
+
+    /* 9. Spin until t0 + 3500 ms */
+    while ((HAL_GetTick() - t0) < 3500)
+        ;
+
+    /* 10. Collect results */
+    ctd_ok = ctd_collect(&ctd);
+    optode_ok = optode_collect(&optode);
+    wetlab_ok = wetlab_collect(&wetlab);
+
+    /* 11. Print results */
+    if (ctd_ok) {
+        shell_printf("[CTD] C=%.4f T=%.4f P=%.5f\r\n",
+                     ctd.conductivity, ctd.temperature, ctd.pressure);
+    } else {
+        shell_print("[CTD] FAILED\r\n");
+    }
+
+    if (optode_ok) {
+        shell_printf("[Optode] O2=%.3f uM  T=%.3f C  CalPh=%.3f\r\n",
+                     optode.o2_concentration, optode.temperature,
+                     optode.cal_phase);
+    } else {
+        shell_print("[Optode] FAILED\r\n");
+    }
+
+    if (wetlab_ok) {
+        shell_printf("[WetLab] CHL=%u@%unm  NTU=%u@%unm  Therm=%u\r\n",
+                     wetlab.chl_signal, wetlab.chl_lambda,
+                     wetlab.ntu_signal, wetlab.ntu_lambda,
+                     wetlab.thermistor);
+    } else {
+        shell_print("[WetLab] FAILED\r\n");
+    }
+
+    /* 12. Spin until t0 + 5000 ms */
+    while ((HAL_GetTick() - t0) < 5000)
+        ;
+
+    /* 13. Power off WetLab */
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+}
+
 /* File System Handlers ---------------------------------------------------*/
 
 /** @brief  Handle the "fs-mount" command

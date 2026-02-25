@@ -73,6 +73,10 @@ const shell_command_t shell_commands[] = {
 
     /* WetLab Commands */
     {"wetlab", "Get WetLab sensor data", cmd_wetlab},
+
+    /* Simultaneous Sampling */
+    {"sensors", "Sample all sensors simultaneously", cmd_sensors},
+
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
     {"fs-unmount", "Unmount the file system", cmd_fs_unmount},
@@ -672,6 +676,14 @@ void cmd_wetlab(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_wetlab, NULL, 0);
+}
+
+/* Simultaneous Sampling ------------------------------------------*/
+
+void cmd_sensors(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_sensors, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/

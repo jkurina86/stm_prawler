@@ -37,6 +37,10 @@ typedef struct {
 void wetlab_init(UART_HandleTypeDef *huart);
 bool wetlab_sample(wetlab_data_t *out);
 
+/* Split-phase API for simultaneous sampling */
+bool wetlab_fire(void);
+bool wetlab_collect(wetlab_data_t *out);
+
 /* Callback notify functions (called from centralized HAL callbacks) */
 void wetlab_notify_tx_cplt(void);
 void wetlab_notify_rx_event(uint16_t size);

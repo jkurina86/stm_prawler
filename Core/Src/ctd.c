@@ -58,7 +58,7 @@ static void ctd_reset_uart(void)
   * @param  out: Pointer to a ctd_data_t structure to receive the parsed data
   * @retval true if successful, false on error (e.g. timeout, parse failure)
   */
-static bool ctd_wakeup(void)
+bool ctd_wakeup(void)
 {
     /*
      * The first CR wakes the CTD hardware from quiescent mode, but the byte
@@ -189,6 +189,64 @@ bool ctd_ts(ctd_data_t *out)
 
     /* Parse: response contains "ts\r\n  cond, temp, pres\r\nS>" */
     /* Find the data line — first line containing a comma */
+    char *line = strtok((char *)rx_buf, "\r\n");
+    while (line) {
+        if (strchr(line, ',')) {
+            char *end;
+            out->conductivity = strtof(line, &end);
+            if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
+            out->temperature = strtof(end + 1, &end);
+            if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
+            out->pressure = strtof(end + 1, &end);
+            return true;
+        }
+        line = strtok(NULL, "\r\n");
+    }
+    return false;
+}
+
+bool ctd_fire(void)
+{
+    const char *cmd = "ts\r";
+    const uint16_t buf_size = sizeof(rx_buf) - 1;
+
+    ctd_reset_uart();
+
+    /* Start continuous RX DMA — poll NDTR, no callbacks */
+    if (HAL_UART_Receive_DMA(ctd_huart, rx_buf, buf_size) != HAL_OK)
+        return false;
+    __HAL_DMA_DISABLE_IT(ctd_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(ctd_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(ctd_huart->Instance->CR3, USART_CR3_EIE);
+
+    /* TX command via DMA */
+    tx_done = false;
+    if (HAL_UART_Transmit_DMA(ctd_huart, (uint8_t *)cmd, strlen(cmd)) != HAL_OK) {
+        HAL_UART_AbortReceive(ctd_huart);
+        return false;
+    }
+    uint32_t t0 = HAL_GetTick();
+    while (!tx_done) {
+        if ((HAL_GetTick() - t0) > 1000) {
+            HAL_UART_Abort(ctd_huart);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ctd_collect(ctd_data_t *out)
+{
+    const uint16_t buf_size = sizeof(rx_buf) - 1;
+    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(ctd_huart->hdmarx);
+    HAL_UART_AbortReceive(ctd_huart);
+
+    if (total == 0)
+        return false;
+
+    rx_buf[total] = '\0';
+
+    /* Parse: find the data line — first line containing a comma */
     char *line = strtok((char *)rx_buf, "\r\n");
     while (line) {
         if (strchr(line, ',')) {

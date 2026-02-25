@@ -92,7 +92,6 @@ bool wetlab_sample(wetlab_data_t *out)
     /* Power off the sensor */
     shell_printf("[wetlab] Power-cycling sensor...\r\n");
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
-    HAL_Delay(1000);
 
     /* Power on, let the line settle before starting DMA */
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
@@ -177,4 +176,67 @@ bool wetlab_sample(wetlab_data_t *out)
     }
 
     return true;
+}
+
+/* Split-phase API for simultaneous sampling --------------------------------*/
+
+bool wetlab_fire(void)
+{
+    const uint16_t buf_size = WETLAB_BUF_SIZE - 1;
+
+    /* Switch UART5 to sensor baud rate */
+    wetlab_huart->Init.BaudRate = WETLAB_BAUD;
+    if (HAL_UART_Init(wetlab_huart) != HAL_OK)
+        return false;
+
+    wetlab_reset_uart();
+
+    /* Start continuous RX DMA — poll NDTR, no callbacks */
+    if (HAL_UART_Receive_DMA(wetlab_huart, rx_buf, buf_size) != HAL_OK)
+        return false;
+    __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(wetlab_huart->Instance->CR3, USART_CR3_EIE);
+
+    return true;
+}
+
+bool wetlab_collect(wetlab_data_t *out)
+{
+    const uint16_t buf_size = WETLAB_BUF_SIZE - 1;
+    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
+    HAL_UART_AbortReceive(wetlab_huart);
+
+    if (total == 0)
+        return false;
+
+    rx_buf[total] = '\0';
+
+    /* Find the 3rd data row (skip "mvs 1" header and first 2 data lines) */
+    int row = 0;
+    char *p = (char *)rx_buf;
+    char *target = NULL;
+    while (*p) {
+        while (*p == '\r' || *p == '\n')
+            p++;
+        if (!*p)
+            break;
+        char *eol = p;
+        while (*eol && *eol != '\r' && *eol != '\n')
+            eol++;
+        if (p[0] != 'm' || p[1] != 'v' || p[2] != 's') {
+            row++;
+            if (row == 3) {
+                target = p;
+                *eol = '\0';
+                break;
+            }
+        }
+        p = eol;
+    }
+
+    if (!target)
+        return false;
+
+    return wetlab_parse(target, out);
 }

@@ -38,6 +38,11 @@ bool optode_sample(optode_data_t *out);
 void optode_listen(void);
 void optode_setup(void);
 
+/* Split-phase API for simultaneous sampling */
+void optode_wake(void);
+bool optode_fire(void);
+bool optode_collect(optode_data_t *out);
+
 /* Callback notify functions (called from centralized HAL callbacks) */
 void optode_notify_tx_cplt(void);
 void optode_notify_rx_event(uint16_t size);
