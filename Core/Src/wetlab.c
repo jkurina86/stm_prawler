@@ -19,13 +19,14 @@
 
 /* Private variables ---------------------------------------------------------*/
 static UART_HandleTypeDef *wetlab_huart;
+static volatile bool tx_done = false;
 static uint8_t rx_buf[WETLAB_BUF_SIZE];
 
 /* Callback notify functions (called from centralized HAL callbacks) ----------*/
 
 void wetlab_notify_tx_cplt(void)
 {
-    /* Not used — sensor auto-transmits, we only receive */
+    tx_done = true;
 }
 
 void wetlab_notify_rx_event(uint16_t size)
@@ -46,28 +47,24 @@ static void wetlab_reset_uart(void)
 
 /**
  * @brief  Parse a data row into wetlab_data_t.
- * @param  line  Tab-separated: MM/DD/YY HH:MM:SS lambda CHL lambda NTU therm
+ * @param  line  Tab-separated: MM/DD/YY HH:MM:SS λ1 sig1 λ2 sig2 λ3 sig3 therm
  * @return true on success.
  */
 static bool wetlab_parse(const char *line, wetlab_data_t *out)
 {
     unsigned m, d, y, hh, mm, ss;
-    unsigned cl, cs, nl, ns, th;
-    if (sscanf(line, "%u/%u/%u %u:%u:%u %u %u %u %u %u",
+    unsigned cl, cs, nl, ns, dl, ds, th;
+    if (sscanf(line, "%u/%u/%u %u:%u:%u %u %u %u %u %u %u %u",
                &m, &d, &y, &hh, &mm, &ss,
-               &cl, &cs, &nl, &ns, &th) != 11)
+               &cl, &cs, &nl, &ns, &dl, &ds, &th) != 13)
         return false;
-    out->month       = (uint8_t)m;
-    out->day         = (uint8_t)d;
-    out->year        = (uint8_t)y;
-    out->hour        = (uint8_t)hh;
-    out->minute      = (uint8_t)mm;
-    out->second      = (uint8_t)ss;
-    out->chl_lambda  = (uint16_t)cl;
-    out->chl_signal  = (uint16_t)cs;
-    out->ntu_lambda  = (uint16_t)nl;
-    out->ntu_signal  = (uint16_t)ns;
-    out->thermistor  = (uint16_t)th;
+    out->chl_lambda   = (uint16_t)cl;
+    out->chl_signal   = (uint16_t)cs;
+    out->ntu_lambda   = (uint16_t)nl;
+    out->ntu_signal   = (uint16_t)ns;
+    out->cdom_lambda  = (uint16_t)dl;
+    out->cdom_signal  = (uint16_t)ds;
+    out->thermistor   = (uint16_t)th;
     return true;
 }
 
@@ -110,25 +107,18 @@ bool wetlab_sample(wetlab_data_t *out)
     __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_TC);
     CLEAR_BIT(wetlab_huart->Instance->CR3, USART_CR3_EIE);
 
-    /* Poll DMA counter for up to 10 seconds.
-     * Stop early once data has arrived and the line is idle for 2s. */
+    /* Poll DMA counter for up to 2 seconds. */
     uint32_t t0 = HAL_GetTick();
     uint16_t prev_received = 0;
-    uint32_t last_activity = t0;
 
-    while ((HAL_GetTick() - t0) < 10000) {
-        uint16_t received = buf_size
-                          - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
+    while ((HAL_GetTick() - t0) < 2500) {
+        uint16_t received = buf_size - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
         if (received != prev_received) {
             prev_received = received;
-            last_activity = HAL_GetTick();
         }
-        if (prev_received > 0 && (HAL_GetTick() - last_activity) > 2000)
-            break;
     }
 
-    uint16_t total = buf_size
-                   - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
+    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
     HAL_UART_AbortReceive(wetlab_huart);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 
@@ -176,6 +166,132 @@ bool wetlab_sample(wetlab_data_t *out)
     }
 
     return true;
+}
+
+void wetlab_raw(void)
+{
+    const uint16_t buf_size = WETLAB_BUF_SIZE - 1;
+
+    wetlab_huart->Init.BaudRate = WETLAB_BAUD;
+    if (HAL_UART_Init(wetlab_huart) != HAL_OK) {
+        shell_printf("[wetlab] UART init failed\r\n");
+        return;
+    }
+
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+    HAL_Delay(100);
+
+    wetlab_reset_uart();
+    if (HAL_UART_Receive_DMA(wetlab_huart, rx_buf, buf_size) != HAL_OK) {
+        shell_printf("[wetlab] Failed to start DMA\r\n");
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+        return;
+    }
+    __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(wetlab_huart->Instance->CR3, USART_CR3_EIE);
+
+    HAL_Delay(4000);
+
+    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
+    HAL_UART_AbortReceive(wetlab_huart);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
+    if (total == 0) {
+        shell_printf("[wetlab] No data received\r\n");
+        return;
+    }
+
+    rx_buf[total] = '\0';
+    shell_printf("[wetlab] %u bytes:\r\n", total);
+    shell_print((char *)rx_buf);
+    shell_print("\r\n");
+}
+
+void wetlab_cmd(const char *cmd)
+{
+    const uint16_t buf_size = WETLAB_BUF_SIZE - 1;
+
+    wetlab_huart->Init.BaudRate = WETLAB_BAUD;
+    if (HAL_UART_Init(wetlab_huart) != HAL_OK) {
+        shell_printf("[wetlab] UART init failed\r\n");
+        return;
+    }
+
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+    HAL_Delay(100);
+
+    wetlab_reset_uart();
+    if (HAL_UART_Receive_DMA(wetlab_huart, rx_buf, buf_size) != HAL_OK) {
+        shell_printf("[wetlab] Failed to start RX DMA\r\n");
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+        return;
+    }
+    __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(wetlab_huart->Instance->CR3, USART_CR3_EIE);
+
+    /* Wait for sensor to boot and start auto-run, then stop it */
+    HAL_Delay(2000);
+
+    tx_done = false;
+    if (HAL_UART_Transmit_DMA(wetlab_huart,
+                               (uint8_t *)"!!!!!", 5) != HAL_OK) {
+        shell_printf("[wetlab] TX failed\r\n");
+        HAL_UART_Abort(wetlab_huart);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+        return;
+    }
+    uint32_t t0 = HAL_GetTick();
+    while (!tx_done) {
+        if ((HAL_GetTick() - t0) > 1000) {
+            HAL_UART_Abort(wetlab_huart);
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+            shell_printf("[wetlab] TX timeout\r\n");
+            return;
+        }
+    }
+
+    /* Let it settle into standby */
+    HAL_Delay(2000);
+
+    /* Send command */
+    tx_done = false;
+    if (HAL_UART_Transmit_DMA(wetlab_huart,
+                               (uint8_t *)cmd, strlen(cmd)) != HAL_OK) {
+        shell_printf("[wetlab] TX failed\r\n");
+        HAL_UART_Abort(wetlab_huart);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+        return;
+    }
+    t0 = HAL_GetTick();
+    while (!tx_done) {
+        if ((HAL_GetTick() - t0) > 1000) {
+            HAL_UART_Abort(wetlab_huart);
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+            shell_printf("[wetlab] TX timeout\r\n");
+            return;
+        }
+    }
+
+    /* Listen for response */
+    HAL_Delay(5000);
+
+    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
+    HAL_UART_AbortReceive(wetlab_huart);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
+    if (total == 0) {
+        shell_printf("[wetlab] No data received\r\n");
+        return;
+    }
+
+    rx_buf[total] = '\0';
+    shell_printf("[wetlab] %u bytes:\r\n", total);
+    shell_print((char *)rx_buf);
+    shell_print("\r\n");
 }
 
 /* Split-phase API for simultaneous sampling --------------------------------*/

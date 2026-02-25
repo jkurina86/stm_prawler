@@ -20,22 +20,21 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 typedef struct {
-    uint8_t  month;
-    uint8_t  day;
-    uint8_t  year;        /* 2-digit */
-    uint8_t  hour;
-    uint8_t  minute;
-    uint8_t  second;
-    uint16_t chl_lambda;  /* nm */
-    uint16_t chl_signal;
-    uint16_t ntu_lambda;  /* nm */
-    uint16_t ntu_signal;
+    uint16_t chl_lambda;  /* nm — channel 1 excitation wavelength */
+    uint16_t chl_signal;  /* counts — channel 1 (chlorophyll) */
+    uint16_t ntu_lambda;  /* nm — channel 2 excitation wavelength */
+    uint16_t ntu_signal;  /* counts — channel 2 (turbidity) */
+    uint16_t cdom_lambda; /* nm — channel 3 excitation wavelength */
+    uint16_t cdom_signal; /* counts — channel 3 (CDOM/fluorescence) */
     uint16_t thermistor;
 } wetlab_data_t;
 
 /* Function prototypes -------------------------------------------------------*/
 void wetlab_init(UART_HandleTypeDef *huart);
 bool wetlab_sample(wetlab_data_t *out);
+
+void wetlab_raw(void);
+void wetlab_cmd(const char *cmd);
 
 /* Split-phase API for simultaneous sampling */
 bool wetlab_fire(void);
