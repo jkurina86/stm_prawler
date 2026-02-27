@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    wetlab.h
   * @brief   Driver for the WetLab sensor
-  * @note    UART5 with DMA2 Ch1 (TX) and DMA2 Ch2 (RX).
+  * @note    UART5 with DMA2 Ch2 (RX only).
   *          PB4 controls power to the sensor.
   ******************************************************************************
   */
@@ -34,14 +34,12 @@ void wetlab_init(UART_HandleTypeDef *huart);
 bool wetlab_sample(wetlab_data_t *out);
 
 void wetlab_raw(void);
-void wetlab_cmd(const char *cmd);
 
 /* Split-phase API for simultaneous sampling */
 bool wetlab_fire(void);
 bool wetlab_collect(wetlab_data_t *out);
 
 /* Callback notify functions (called from centralized HAL callbacks) */
-void wetlab_notify_tx_cplt(void);
 void wetlab_notify_rx_event(uint16_t size);
 
 #ifdef __cplusplus

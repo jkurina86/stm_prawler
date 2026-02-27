@@ -69,7 +69,6 @@ void handle_optode_setup(const void *arg);
 /* WetLab */
 void handle_wetlab(const void *arg);
 void handle_wetlab_raw(const void *arg);
-void handle_wetlab_getcd(const void *arg);
 
 /* Simultaneous sampling */
 void handle_sensors(const void *arg);

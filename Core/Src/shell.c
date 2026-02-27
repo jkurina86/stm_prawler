@@ -74,7 +74,6 @@ const shell_command_t shell_commands[] = {
     /* WetLab Commands */
     {"wetlab", "Get WetLab sensor data", cmd_wetlab},
     {"wetlab-raw", "Dump raw WetLab output (4s)", cmd_wetlab_raw},
-    {"wetlab-getcd", "Send GetCD to WetLab", cmd_wetlab_getcd},
 
     /* Simultaneous Sampling */
     {"sensors", "Sample all sensors simultaneously", cmd_sensors},
@@ -684,12 +683,6 @@ void cmd_wetlab_raw(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_wetlab_raw, NULL, 0);
-}
-
-void cmd_wetlab_getcd(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wetlab_getcd, NULL, 0);
 }
 
 /* Simultaneous Sampling ------------------------------------------*/

@@ -77,7 +77,6 @@ void cmd_optode_setup(int argc, char **argv);
 /* WetLab Command functions */
 void cmd_wetlab(int argc, char **argv);
 void cmd_wetlab_raw(int argc, char **argv);
-void cmd_wetlab_getcd(int argc, char **argv);
 
 /* Simultaneous sampling */
 void cmd_sensors(int argc, char **argv);

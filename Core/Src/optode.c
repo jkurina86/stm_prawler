@@ -20,15 +20,12 @@ static volatile uint16_t rx_len = 0;
 static uint8_t rx_buf[1024];
 
 /*
- * Wake-up preamble: 120 '/' comment characters (~125 ms at 9600 baud)
+ * Wake-up preamble: '/' comment characters
  * followed by CR+LF to terminate the comment line.  The sensor ignores
  * comment lines (no response), but the incoming bytes wake it from
  * Communication Sleep.  See datasheet section 5.6.
  */
-static const char wake_preamble[] =
-    "////////////////////////////////////////////////////////////"
-    "////////////////////////////////////////////////////////////"
-    "\r\n";
+static const char wake_preamble[] = "////////\r\n";
 
 /* Callback notify functions (called from centralized HAL callbacks) ----------*/
 

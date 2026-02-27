@@ -499,8 +499,6 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
         ctd_notify_tx_cplt();
     else if (huart->Instance == USART2)
         optode_notify_tx_cplt();
-    else if (huart->Instance == UART5)
-        wetlab_notify_tx_cplt();
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)

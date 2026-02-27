@@ -360,12 +360,6 @@ void handle_wetlab_raw(const void *arg)
     wetlab_raw();
 }
 
-void handle_wetlab_getcd(const void *arg)
-{
-    (void)arg;
-    wetlab_cmd("help\r");
-}
-
 /* Simultaneous Sampling --------------------------------------------------*/
 
 void handle_sensors(const void *arg)
@@ -376,48 +370,48 @@ void handle_sensors(const void *arg)
     wetlab_data_t wetlab = {0};
     bool ctd_ok = false, optode_ok = false, wetlab_ok = false;
 
-    shell_print("[sensors] Waking sensors...\r\n");
+    /* 1. Capture t0, power on WetLab immediately */
+    uint32_t t0 = HAL_GetTick();
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
 
-    /* 1. Wake optode (absorb any error from sleep) */
+    /* 2. Wake optode and CTD while WetLab boots (~1s overlaps with 1.5s boot) */
     optode_wake();
 
-    /* 2. Wake CTD */
     if (!ctd_wakeup())
         shell_print("[sensors] CTD wakeup failed\r\n");
 
-    /* 3. Capture t0 */
-    uint32_t t0 = HAL_GetTick();
-
-    /* 4. Power on WetLab */
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-
-    /* 5. Fire CTD */
+    /* 3. Fire CTD and Optode */
     if (!ctd_fire())
         shell_print("[sensors] CTD fire failed\r\n");
 
-    /* 6. Fire Optode */
     if (!optode_fire())
         shell_print("[sensors] Optode fire failed\r\n");
 
-    /* 7. Pad to 100 ms from PB4 HIGH for line settle */
-    uint32_t elapsed = HAL_GetTick() - t0;
-    if (elapsed < 100)
-        HAL_Delay(100 - elapsed);
+    /* 4. Wait until t0+1500 ms for WetLab to start auto-transmitting */
+    while ((HAL_GetTick() - t0) < 1500)
+        ;
 
-    /* 8. Fire WetLab */
+    /* 5. Fire WetLab */
     if (!wetlab_fire())
         shell_print("[sensors] WetLab fire failed\r\n");
 
-    /* 9. Spin until t0 + 3500 ms */
+    /* 6. Spin until t0+3500 ms */
     while ((HAL_GetTick() - t0) < 3500)
         ;
 
-    /* 10. Collect results */
+    /* 7. Collect results */
     ctd_ok = ctd_collect(&ctd);
     optode_ok = optode_collect(&optode);
     wetlab_ok = wetlab_collect(&wetlab);
 
-    /* 11. Print results */
+    /* 8. Power off WetLab */
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+
+    /* 8.5. Print time elapsed */
+    uint32_t elapsed = HAL_GetTick() - t0;
+    shell_printf("[sensors] Time elapsed: %lu ms\r\n", elapsed);
+
+    /* 9. Print results */
     if (ctd_ok) {
         shell_printf("[CTD] C=%.4f T=%.4f P=%.5f\r\n",
                      ctd.conductivity, ctd.temperature, ctd.pressure);
@@ -442,13 +436,6 @@ void handle_sensors(const void *arg)
     } else {
         shell_print("[WetLab] FAILED\r\n");
     }
-
-    /* 12. Spin until t0 + 5000 ms */
-    while ((HAL_GetTick() - t0) < 5000)
-        ;
-
-    /* 13. Power off WetLab */
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 }
 
 /* File System Handlers ---------------------------------------------------*/
