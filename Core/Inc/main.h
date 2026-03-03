@@ -79,8 +79,6 @@ void Error_Handler(void);
 #define PB4_AUX_SEL_A0_GPIO_Port GPIOB
 #define PB5_AUX_SEL_A1_Pin GPIO_PIN_5
 #define PB5_AUX_SEL_A1_GPIO_Port GPIOB
-#define PB8_TRUCK_INT_IN_Pin GPIO_PIN_8
-#define PB8_TRUCK_INT_IN_GPIO_Port GPIOB
 #define PB9_TRUCK_INT_OUT_Pin GPIO_PIN_9
 #define PB9_TRUCK_INT_OUT_GPIO_Port GPIOB
 
