@@ -19,8 +19,6 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 typedef struct {
-    uint16_t product_no;
-    uint16_t serial_no;
     float o2_concentration;  /* uM */
     float temperature;       /* deg C */
     float cal_phase;         /* deg */

@@ -178,7 +178,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
     shell_task();
     tasker_run();
-    recorder_tick();
+    recorder_service();
 
   }
   /* USER CODE END 3 */

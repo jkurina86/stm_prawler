@@ -209,7 +209,7 @@ void recorder_init(void)
     file_counter = 0;
 }
 
-void recorder_tick(void)
+void recorder_service(void)
 {
     switch (state) {
 

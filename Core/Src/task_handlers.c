@@ -307,7 +307,7 @@ void handle_optode(const void *arg)
     (void)arg;
     optode_data_t data;
     if (optode_sample(&data)) {
-        shell_printf("\nOptode %u (S/N %u):\r\n", data.product_no, data.serial_no);
+        shell_printf("\nOptode:\r\n");
         shell_printf("O2 Concentration: %.3f uM\r\n", data.o2_concentration);
         shell_printf("Temperature:      %.3f C\r\n", data.temperature);
         shell_printf("CalPhase:         %.3f deg\r\n", data.cal_phase);

@@ -32,7 +32,7 @@ typedef struct {
 
 /* Exported function prototypes ----------------------------------------------*/
 void recorder_init(void);
-void recorder_tick(void);
+void recorder_service(void);
 
 #ifdef __cplusplus
 }

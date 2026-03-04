@@ -20,36 +20,33 @@ from pathlib import Path
 #   float     ctd.cond       offset 12
 #   float     ctd.temp       offset 16
 #   float     ctd.press      offset 20
-#   uint16_t  opt.product    offset 24
-#   uint16_t  opt.serial     offset 26
-#   float     opt.o2_conc    offset 28
-#   float     opt.temp       offset 32
-#   float     opt.cal_phase  offset 36
-#   float     opt.tc_phase   offset 40
-#   float     opt.c1_rph     offset 44
-#   float     opt.c2_rph     offset 48
-#   float     opt.c1_amp     offset 52
-#   float     opt.c2_amp     offset 56
-#   float     opt.raw_temp   offset 60
-#   uint16_t  wet.chl_lam    offset 64
-#   uint16_t  wet.chl_sig    offset 66
-#   uint16_t  wet.ntu_lam    offset 68
-#   uint16_t  wet.ntu_sig    offset 70
-#   uint16_t  wet.cdom_lam   offset 72
-#   uint16_t  wet.cdom_sig   offset 74
-#   uint16_t  wet.therm      offset 76
-#   2 bytes   padding        offset 78
-#   Total: 80 bytes
+#   float     opt.o2_conc    offset 24
+#   float     opt.temp       offset 28
+#   float     opt.cal_phase  offset 32
+#   float     opt.tc_phase   offset 36
+#   float     opt.c1_rph     offset 40
+#   float     opt.c2_rph     offset 44
+#   float     opt.c1_amp     offset 48
+#   float     opt.c2_amp     offset 52
+#   float     opt.raw_temp   offset 56
+#   uint16_t  wet.chl_lam    offset 60
+#   uint16_t  wet.chl_sig    offset 62
+#   uint16_t  wet.ntu_lam    offset 64
+#   uint16_t  wet.ntu_sig    offset 66
+#   uint16_t  wet.cdom_lam   offset 68
+#   uint16_t  wet.cdom_sig   offset 70
+#   uint16_t  wet.therm      offset 72
+#   2 bytes   padding        offset 74
+#   Total: 76 bytes
 
 RECORD_MAGIC = 0xFACEFACE
-RECORD_FMT = "<III fff HH fffffffff HHHHHHH xx"
-RECORD_SIZE = struct.calcsize(RECORD_FMT)  # 80
+RECORD_FMT = "<III fff fffffffff HHHHHHH xx"
+RECORD_SIZE = struct.calcsize(RECORD_FMT)  # 76
 GPS_EPOCH = datetime.datetime(1980, 1, 6, tzinfo=datetime.timezone.utc)
 
 FIELD_NAMES = [
     "magic", "record_num", "timestamp",
     "ctd_cond", "ctd_temp", "ctd_press",
-    "opt_product", "opt_serial",
     "opt_o2_conc", "opt_temp", "opt_cal_phase", "opt_tc_phase",
     "opt_c1_rph", "opt_c2_rph", "opt_c1_amp", "opt_c2_amp", "opt_raw_temp",
     "wet_chl_lambda", "wet_chl_signal",
@@ -61,7 +58,6 @@ FIELD_NAMES = [
 CSV_COLUMNS = [
     "file", "record_num", "timestamp_gps", "datetime_utc",
     "ctd_cond", "ctd_temp", "ctd_press",
-    "opt_product", "opt_serial",
     "opt_o2_conc", "opt_temp", "opt_cal_phase", "opt_tc_phase",
     "opt_c1_rph", "opt_c2_rph", "opt_c1_amp", "opt_c2_amp", "opt_raw_temp",
     "wet_chl_lambda", "wet_chl_signal",
@@ -124,8 +120,7 @@ def print_records(records, filename):
 
         print(f"Record #{rec['record_num']}  |  {ts_str}  (GPS {rec['timestamp']})")
         print(f"  CTD   C={rec['ctd_cond']:.4f}  T={rec['ctd_temp']:.4f}  P={rec['ctd_press']:.5f}")
-        print(f"  Optode {rec['opt_product']}/{rec['opt_serial']}  "
-              f"O2={rec['opt_o2_conc']:.3f} uM  T={rec['opt_temp']:.3f} C  "
+        print(f"  Optode O2={rec['opt_o2_conc']:.3f} uM  T={rec['opt_temp']:.3f} C  "
               f"CalPh={rec['opt_cal_phase']:.3f}  TCPh={rec['opt_tc_phase']:.3f}")
         print(f"         C1RPh={rec['opt_c1_rph']:.3f}  C2RPh={rec['opt_c2_rph']:.3f}  "
               f"C1Amp={rec['opt_c1_amp']:.1f}  C2Amp={rec['opt_c2_amp']:.1f}  "
@@ -172,8 +167,6 @@ def print_csv(all_records):
                 f"{rec['ctd_cond']:.4f}",
                 f"{rec['ctd_temp']:.4f}",
                 f"{rec['ctd_press']:.5f}",
-                str(rec["opt_product"]),
-                str(rec["opt_serial"]),
                 f"{rec['opt_o2_conc']:.3f}",
                 f"{rec['opt_temp']:.3f}",
                 f"{rec['opt_cal_phase']:.3f}",

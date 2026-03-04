@@ -144,19 +144,18 @@ static uint16_t optode_send_sample(bool with_preamble)
  *   4330\t1638\tO2Conc\tTemp\tCalPhase\tTCPhase\tC1RPh\tC2RPh\tC1Amp\tC2Amp\tRawTemp
  * With Enable Text=No the labels are omitted; field order is the same.
  *
- * Strategy: first two tab tokens are product/serial (integers).
+ * Strategy: first two tab tokens are product/serial (integers) — skip them.
  * Remaining tokens: try strtof(); skip text labels (endptr == token).
  * Assign first two successful floats to O2 concentration and temperature.
  */
 static bool optode_parse(char *line, optode_data_t *out)
 {
+    /* Skip product_no and serial_no tokens */
     char *tok = strtok(line, "\t");
     if (!tok) return false;
-    out->product_no = (uint16_t)strtoul(tok, NULL, 10);
 
     tok = strtok(NULL, "\t");
     if (!tok) return false;
-    out->serial_no = (uint16_t)strtoul(tok, NULL, 10);
 
     int idx = 0;
     float vals[9];
