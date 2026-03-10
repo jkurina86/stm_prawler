@@ -86,7 +86,7 @@ bool ctd_wakeup(void)
                 break;
             }
         }
-        
+
         /* guard in case tx didn't complete */
         if (!tx_done) {
             continue;
@@ -246,16 +246,23 @@ bool ctd_collect(ctd_data_t *out)
 
     rx_buf[total] = '\0';
 
-    /* Parse: find the data line — first line containing a comma */
+    /* Parse: find the data line, first line containing a comma */
+    /* Note: Couldn't get this to work with sscanf */
     char *line = strtok((char *)rx_buf, "\r\n");
     while (line) {
         if (strchr(line, ',')) {
             char *end;
-            out->conductivity = strtof(line, &end);
-            if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
+            out->pressure = strtof(line, &end);
+            if (*end != ',') {
+                line = strtok(NULL, "\r\n");
+                continue;
+            }
             out->temperature = strtof(end + 1, &end);
-            if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
-            out->pressure = strtof(end + 1, &end);
+            if (*end != ',') {
+                line = strtok(NULL, "\r\n");
+                continue;
+            }
+            out->conductivity = strtof(end + 1, &end);
             return true;
         }
         line = strtok(NULL, "\r\n");

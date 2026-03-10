@@ -3,7 +3,7 @@
   * @file    recorder.c
   * @brief   PB8-triggered continuous sensor logging to SD card
   * @note    When PB8 goes HIGH, samples all 3 sensors every 4s and writes
-  *          binary records to a double-buffered log file. When PB8 goes LOW,
+  *          CSV records to a double-buffered log file. When PB8 goes LOW,
   *          flushes remaining data and closes the file.
   ******************************************************************************
   */
@@ -21,8 +21,10 @@
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define REC_BUF_SIZE      4096
-#define SAMPLE_INTERVAL   4000  /* ms between samples */
+#define REC_BUF_SIZE          1024
+#define SAMPLE_INTERVAL       4000  /* ms between samples */
+#define TOLERANCE             0.5f  /* Depth tolerance (dbar) */
+#define FALSE_START_SAMPLES   15    /* Validation window: 15 × 4s = 60s */
 
 /* Private types -------------------------------------------------------------*/
 typedef enum {
@@ -37,10 +39,19 @@ static uint16_t buf_offset;
 
 static FIL rec_file;
 static rec_state_t state;
+static uint32_t start_time;
+static bool first_sample;
+static float initial_depth = 0.0f;
+static float max_pressure;
+static uint16_t sample_count;
 static uint32_t record_num;
 static uint32_t next_sample_tick;
 static uint16_t file_counter;
 static char rec_filename[16];
+
+ctd_data_t ctd = {0};
+optode_data_t optode = {0};
+wetlab_data_t wetlab = {0};
 
 /* start_flag set by EXTI ISR on PB8 rising edge (owned by main.c) */
 extern volatile bool start_flag;
@@ -125,7 +136,7 @@ static bool open_log_file(void)
         return false;
     }
 
-    /* Find an unused filename: rec_0001.bin, rec_0002.bin, ... */
+    /* Find an unused filename: rec_0001.csv, rec_0002.csv, ... */
     for (;;) {
         file_counter++;
         if (file_counter > 9999) {
@@ -133,10 +144,20 @@ static bool open_log_file(void)
             return false;
         }
 
-        snprintf(rec_filename, sizeof(rec_filename), "rec_%04u.bin", file_counter);
+        snprintf(rec_filename, sizeof(rec_filename), "rec_%04u.csv", file_counter);
 
         FRESULT fr = f_open(&rec_file, rec_filename, FA_WRITE | FA_CREATE_NEW);
         if (fr == FR_OK) {
+            /* Write CSV header */
+            static const char hdr[] =
+                "ProfileNo,GPS_Epoch_UTC,CTD_C,CTD_T,CTD_D,"
+                "Optode_O2,Optode_Temp,Optode_Cal_Ph,Optode_Tc_Ph,"
+                "Optode_C1_Ph,Optode_C2_Ph,Optode_C1_Amp,Optode_C2_Amp,Optode_Temp_raw,"
+                "Wetlab_C1_lambda,Wetlab_C1_signal,Wetlab_C2_lambda,Wetlab_C2_signal,"
+                "Wetlab_C3_lambda,Wetlab_C3_signal,Wetlab_Therm\r\n";
+            UINT bw;
+            f_write(&rec_file, hdr, sizeof(hdr) - 1, &bw);
+            f_sync(&rec_file);
             return true;
         }
         if (fr != FR_EXIST) {
@@ -149,10 +170,6 @@ static bool open_log_file(void)
 
 static void sample_sensors(void)
 {
-    ctd_data_t ctd = {0};
-    optode_data_t optode = {0};
-    wetlab_data_t wetlab = {0};
-
     /* Same sequence as handle_sensors */
     uint32_t t0 = HAL_GetTick();
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);  /* WetLab power on */
@@ -177,24 +194,35 @@ static void sample_sensors(void)
 
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);  /* WetLab power off */
 
-    /* Build record */
-    record_data_t rec;
-    rec.magic = RECORD_MAGIC;
-    rec.record_num = record_num;
-    rec.timestamp = get_timestamp();
-    rec.ctd = ctd;
-    rec.optode = optode;
-    rec.wetlab = wetlab;
+    /* Format CSV line */
+    uint32_t ts = get_timestamp();
+    char line_buf[256];
+    int line_len = snprintf(line_buf, sizeof(line_buf),
+        "%lu,%lu,%f,%f,%f,"
+        "%f,%f,%f,%f,%f,%f,%f,%f,%f,"
+        "%u,%u,%u,%u,%u,%u,%u\r\n",
+        record_num, ts,
+        ctd.conductivity, ctd.temperature, ctd.pressure,
+        optode.o2_concentration, optode.temperature, optode.cal_phase,
+        optode.tc_phase, optode.c1_rph, optode.c2_rph,
+        optode.c1_amp, optode.c2_amp, optode.raw_temp,
+        wetlab.chl_lambda, wetlab.chl_signal,
+        wetlab.ntu_lambda, wetlab.ntu_signal,
+        wetlab.cdom_lambda, wetlab.cdom_signal,
+        wetlab.thermistor);
 
-    /* Check if record fits in current buffer */
-    if (buf_offset + sizeof(record_data_t) > REC_BUF_SIZE) {
+    if (line_len < 0 || (size_t)line_len >= sizeof(line_buf))
+        line_len = sizeof(line_buf) - 1;
+
+    /* Check if line fits in current buffer */
+    if (buf_offset + line_len > REC_BUF_SIZE) {
         flush_buffer(rec_buf[active_buf], buf_offset);
         active_buf ^= 1;
         buf_offset = 0;
     }
 
-    memcpy(&rec_buf[active_buf][buf_offset], &rec, sizeof(record_data_t));
-    buf_offset += sizeof(record_data_t);
+    memcpy(&rec_buf[active_buf][buf_offset], line_buf, line_len);
+    buf_offset += line_len;
     record_num++;
 }
 
@@ -229,7 +257,12 @@ void recorder_service(void)
 
             /* Take first sample immediately */
             sample_sensors();
+            sample_count = 0;
+            first_sample = false;
             next_sample_tick = HAL_GetTick() + SAMPLE_INTERVAL;
+            start_time = HAL_GetTick();
+            initial_depth = ctd.pressure;
+            max_pressure = ctd.pressure;
 
             state = REC_RECORDING;
         }
@@ -245,15 +278,44 @@ void recorder_service(void)
             shell_printf("[recorder] Stopped. %lu records saved to %s\r\n",
                          record_num, rec_filename);
 
+            __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
+            start_flag = false;
             state = REC_IDLE;
+            first_sample = true;
+            start_time = 0;
             return;
         }
 
         /* Time for next sample? */
         if ((HAL_GetTick() - next_sample_tick) < 0x80000000UL) {
             sample_sensors();
+            sample_count++;
             next_sample_tick += SAMPLE_INTERVAL;
+
+            /* False start detection during validation window */
+            if (sample_count <= FALSE_START_SAMPLES) {
+                if (ctd.pressure > max_pressure)
+                    max_pressure = ctd.pressure;
+
+                if (sample_count == FALSE_START_SAMPLES &&
+                    max_pressure <= initial_depth + TOLERANCE) {
+                    /* No significant descent — discard recording */
+                    f_close(&rec_file);
+                    f_unlink(rec_filename);
+                    shell_printf("[recorder] False start — file %s removed\r\n",
+                                 rec_filename);
+                    /* Clear any pending EXTI/start_flag so we don't
+                       immediately re-trigger while PB8 is still HIGH */
+                    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
+                    start_flag = false;
+                    state = REC_IDLE;
+                    first_sample = true;
+                    start_time = 0;
+                    return;
+                }
+            }
         }
+
         break;
     }
 }

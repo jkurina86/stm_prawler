@@ -150,10 +150,11 @@ static uint16_t optode_send_sample(bool with_preamble)
  */
 static bool optode_parse(char *line, optode_data_t *out)
 {
-    /* Skip product_no and serial_no tokens */
+    /* Skip product_no token */
     char *tok = strtok(line, "\t");
     if (!tok) return false;
 
+    /* Skip serial_no token */
     tok = strtok(NULL, "\t");
     if (!tok) return false;
 

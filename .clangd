@@ -1,0 +1,22 @@
+# Clangd configuration for STM32 project
+# Points clangd to the build directory containing compile_commands.json
+
+CompileFlags:
+  # Tell clangd where to find compile_commands.json
+  CompilationDatabase: build/Debug
+
+  # Fallback flags if compile_commands.json is not found
+  Add:
+    - "-IDrivers/STM32L4xx_HAL_Driver/Inc"
+    - "-IDrivers/STM32L4xx_HAL_Driver/Inc/Legacy"
+    - "-IDrivers/CMSIS/Device/ST/STM32L4xx/Include"
+    - "-IDrivers/CMSIS/Include"
+    - "-ICore/Inc"
+    - "-IFATFS/App"
+    - "-IFATFS/Target"
+    - "-IMiddlewares/Third_Party/FatFs/src"
+    - "-DUSE_HAL_DRIVER"
+    - "-DSTM32L476xx"
+
+Diagnostics:
+  UnusedIncludes: None
