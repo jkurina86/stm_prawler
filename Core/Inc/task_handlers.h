@@ -39,6 +39,11 @@ typedef struct {
     uint16_t seconds;
 } rtc_timer_set_args_t;
 
+typedef struct {
+    uint8_t level;
+    uint8_t set;    /* 0 = get, 1 = set */
+} config_args_t;
+
 /* Handler prototypes (all void fn(const void *arg)) ---------------------*/
 
 /* General */
@@ -72,6 +77,9 @@ void handle_wetlab_raw(const void *arg);
 
 /* Simultaneous sampling */
 void handle_sensors(const void *arg);
+
+/* Config */
+void handle_config(const void *arg);
 
 /* File System */
 void handle_fs_mount(const void *arg);

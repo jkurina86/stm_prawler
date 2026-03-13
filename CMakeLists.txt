@@ -54,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/optode.c
     Core/Src/wetlab.c
     Core/Src/recorder.c
+    Core/Src/config.c
 )
 
 # Add include paths

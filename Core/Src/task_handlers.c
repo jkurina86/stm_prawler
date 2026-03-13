@@ -16,6 +16,7 @@
 #include "ctd.h"
 #include "optode.h"
 #include "wetlab.h"
+#include "config.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -369,13 +370,17 @@ void handle_sensors(const void *arg)
     optode_data_t optode = {0};
     wetlab_data_t wetlab = {0};
     bool ctd_ok = false, optode_ok = false, wetlab_ok = false;
+    bool has_optode = config_has_optode();
+    bool has_wetlab = config_has_wetlab();
 
     /* 1. Capture t0, power on WetLab immediately */
     uint32_t t0 = HAL_GetTick();
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
+    if (has_wetlab)
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
 
     /* 2. Wake optode and CTD while WetLab boots (~1s overlaps with 1.5s boot) */
-    optode_wake();
+    if (has_optode)
+        optode_wake();
 
     if (!ctd_wakeup())
         shell_print("[sensors] CTD wakeup failed\r\n");
@@ -384,28 +389,29 @@ void handle_sensors(const void *arg)
     if (!ctd_fire())
         shell_print("[sensors] CTD fire failed\r\n");
 
-    if (!optode_fire())
+    if (has_optode && !optode_fire())
         shell_print("[sensors] Optode fire failed\r\n");
 
     /* 4. Wait until t0+1500 ms for WetLab to start auto-transmitting */
-    while ((HAL_GetTick() - t0) < 1500)
-        ;
+    HAL_Delay(1500);
 
     /* 5. Fire WetLab */
-    if (!wetlab_fire())
+    if (has_wetlab && !wetlab_fire())
         shell_print("[sensors] WetLab fire failed\r\n");
 
     /* 6. Spin until t0+3500 ms */
-    while ((HAL_GetTick() - t0) < 3500)
-        ;
+    HAL_Delay(1200);
 
     /* 7. Collect results */
     ctd_ok = ctd_collect(&ctd);
-    optode_ok = optode_collect(&optode);
-    wetlab_ok = wetlab_collect(&wetlab);
+    if (has_optode)
+        optode_ok = optode_collect(&optode);
+    if (has_wetlab)
+        wetlab_ok = wetlab_collect(&wetlab);
 
     /* 8. Power off WetLab */
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
+    if (has_wetlab)
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
 
     /* 8.5. Print time elapsed */
     uint32_t elapsed = HAL_GetTick() - t0;
@@ -419,22 +425,47 @@ void handle_sensors(const void *arg)
         shell_print("[CTD] FAILED\r\n");
     }
 
-    if (optode_ok) {
-        shell_printf("[Optode] O2=%.3f uM  T=%.3f C  CalPh=%.3f\r\n",
-                     optode.o2_concentration, optode.temperature,
-                     optode.cal_phase);
-    } else {
-        shell_print("[Optode] FAILED\r\n");
+    if (has_optode) {
+        if (optode_ok) {
+            shell_printf("[Optode] O2=%.3f uM  T=%.3f C  CalPh=%.3f\r\n",
+                         optode.o2_concentration, optode.temperature,
+                         optode.cal_phase);
+        } else {
+            shell_print("[Optode] FAILED\r\n");
+        }
     }
 
-    if (wetlab_ok) {
-        shell_printf("[WetLab] CHL=%u@%unm  NTU=%u@%unm  CDOM=%u@%unm  Therm=%u\r\n",
-                     wetlab.chl_signal, wetlab.chl_lambda,
-                     wetlab.ntu_signal, wetlab.ntu_lambda,
-                     wetlab.cdom_signal, wetlab.cdom_lambda,
-                     wetlab.thermistor);
+    if (has_wetlab) {
+        if (wetlab_ok) {
+            shell_printf("[WetLab] CHL=%u@%unm  NTU=%u@%unm  CDOM=%u@%unm  Therm=%u\r\n",
+                         wetlab.chl_signal, wetlab.chl_lambda,
+                         wetlab.ntu_signal, wetlab.ntu_lambda,
+                         wetlab.cdom_signal, wetlab.cdom_lambda,
+                         wetlab.thermistor);
+        } else {
+            shell_print("[WetLab] FAILED\r\n");
+        }
+    }
+}
+
+/* Config Handlers --------------------------------------------------------*/
+
+void handle_config(const void *arg)
+{
+    const config_args_t *a = (const config_args_t *)arg;
+
+    if (a->set) {
+        config_set_sensor_level(a->level);
+        shell_printf("Sensor config set to %u\r\n", config_get_sensor_level());
     } else {
-        shell_print("[WetLab] FAILED\r\n");
+        uint8_t lvl = config_get_sensor_level();
+        shell_printf("Sensor config: %u", lvl);
+        switch (lvl) {
+            case SENSOR_CFG_CTD_ONLY:   shell_print(" (CTD only)\r\n"); break;
+            case SENSOR_CFG_CTD_OPTODE: shell_print(" (CTD + Optode)\r\n"); break;
+            case SENSOR_CFG_ALL:        shell_print(" (CTD + Optode + WetLab)\r\n"); break;
+            default:                    shell_print(" (unknown)\r\n"); break;
+        }
     }
 }
 

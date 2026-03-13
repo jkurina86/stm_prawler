@@ -30,6 +30,7 @@
 #include "optode.h"
 #include "wetlab.h"
 #include "recorder.h"
+#include "config.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -156,6 +157,7 @@ int main(void)
 
 
 
+  config_init();
   transceiver_init();
   tasker_init();
   filesystem_init();

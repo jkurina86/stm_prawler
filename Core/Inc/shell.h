@@ -81,6 +81,9 @@ void cmd_wetlab_raw(int argc, char **argv);
 /* Simultaneous sampling */
 void cmd_sensors(int argc, char **argv);
 
+/* Config */
+void cmd_config(int argc, char **argv);
+
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);
 void cmd_fs_unmount(int argc, char **argv);

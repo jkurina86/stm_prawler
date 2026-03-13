@@ -15,7 +15,9 @@
 #include "ab-rtcmc-rtc.h"
 #include "ctd.h"
 #include "optode.h"
+#include "stm32l4xx_hal.h"
 #include "wetlab.h"
+#include "config.h"
 #include "ff.h"
 #include <string.h>
 #include <stdio.h>
@@ -170,29 +172,36 @@ static bool open_log_file(void)
 
 static void sample_sensors(void)
 {
-    /* Same sequence as handle_sensors */
-    uint32_t t0 = HAL_GetTick();
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);  /* WetLab power on */
+    /* Same sequence as handle_sensors, guarded by sensor config */
+    bool has_optode = config_has_optode();
+    bool has_wetlab = config_has_wetlab();
 
-    optode_wake();
+    if (has_wetlab)
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);  /* WetLab power on */
+
+    if (has_optode)
+        optode_wake();
     ctd_wakeup();
 
     ctd_fire();
-    optode_fire();
+    if (has_optode)
+        optode_fire();
 
-    while ((HAL_GetTick() - t0) < 1500)
-        ;
+    HAL_Delay(1500);
 
-    wetlab_fire();
+    if (has_wetlab)
+        wetlab_fire();
 
-    while ((HAL_GetTick() - t0) < 3500)
-        ;
+    HAL_Delay(1200);
 
     ctd_collect(&ctd);
-    optode_collect(&optode);
-    wetlab_collect(&wetlab);
+    if (has_optode)
+        optode_collect(&optode);
+    if (has_wetlab)
+        wetlab_collect(&wetlab);
 
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);  /* WetLab power off */
+    if (has_wetlab)
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);  /* WetLab power off */
 
     /* Format CSV line */
     uint32_t ts = get_timestamp();

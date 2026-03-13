@@ -11,6 +11,7 @@
 #include "main.h"
 #include "tasker.h"
 #include "task_handlers.h"
+#include "config.h"
 #include "filesystem.h"
 #include <stdarg.h>
 
@@ -77,6 +78,9 @@ const shell_command_t shell_commands[] = {
 
     /* Simultaneous Sampling */
     {"sensors", "Sample all sensors simultaneously", cmd_sensors},
+
+    /* Config */
+    {"config", "Get/set sensor config (1-3)", cmd_config},
 
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
@@ -691,6 +695,20 @@ void cmd_sensors(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_sensors, NULL, 0);
+}
+
+/* Config Commands ------------------------------------------------*/
+
+void cmd_config(int argc, char **argv)
+{
+    config_args_t args = {0};
+
+    if (argc >= 2) {
+        args.level = (uint8_t)atoi(argv[1]);
+        args.set = 1;
+    }
+
+    tasker_enqueue(handle_config, &args, sizeof(args));
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/
