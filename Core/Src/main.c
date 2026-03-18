@@ -31,6 +31,7 @@
 #include "wetlab.h"
 #include "recorder.h"
 #include "config.h"
+#include "wifi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -166,6 +167,7 @@ int main(void)
   optode_init(&huart2);
   wetlab_init(&huart5);
   recorder_init();
+  wifi_init(&huart4);
   shell_init();
 
 

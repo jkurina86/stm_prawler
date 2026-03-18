@@ -13,6 +13,7 @@
 #include "task_handlers.h"
 #include "config.h"
 #include "filesystem.h"
+#include "wifi.h"
 #include <stdarg.h>
 
 extern UART_HandleTypeDef huart1;
@@ -93,6 +94,12 @@ const shell_command_t shell_commands[] = {
     {"fs-mkdir", "Create a directory", cmd_fs_mkdir},
     {"fs-rmdir", "Remove a directory", cmd_fs_rmdir},
     {"fs-cp", "Copy a file", cmd_fs_cp},
+
+    /* WiFi Commands */
+    {"wifi-status", "Show WiFi module state", cmd_wifi_status},
+    {"wifi-send", "Send message over WiFi", cmd_wifi_send},
+    {"wifi-poll", "Poll for incoming WiFi message", cmd_wifi_poll},
+    {"wifi-accept", "Wait for TCP client connection", cmd_wifi_accept},
 
     {NULL, NULL, NULL} /* End marker */
 };
@@ -709,6 +716,50 @@ void cmd_config(int argc, char **argv)
     }
 
     tasker_enqueue(handle_config, &args, sizeof(args));
+}
+
+/* WiFi Commands ---------------------------------------------------*/
+
+void cmd_wifi_status(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_wifi_status, NULL, 0);
+}
+
+void cmd_wifi_send(int argc, char **argv)
+{
+    if (argc < 2)
+        return;
+
+    char *buf = wifi_get_send_buf();
+    buf[0] = '\0';
+
+    /* Concatenate all args into the send buffer */
+    uint16_t pos = 0;
+    for (int i = 1; i < argc && pos < 255; i++) {
+        if (i > 1 && pos < 255)
+            buf[pos++] = ' ';
+        uint16_t len = strlen(argv[i]);
+        if (pos + len > 255)
+            len = 255 - pos;
+        memcpy(&buf[pos], argv[i], len);
+        pos += len;
+    }
+    buf[pos] = '\0';
+
+    tasker_enqueue(handle_wifi_send, NULL, 0);
+}
+
+void cmd_wifi_poll(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_wifi_poll, NULL, 0);
+}
+
+void cmd_wifi_accept(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_wifi_accept, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/

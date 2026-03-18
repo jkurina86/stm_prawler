@@ -17,6 +17,7 @@
 #include "optode.h"
 #include "wetlab.h"
 #include "config.h"
+#include "wifi.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -696,4 +697,57 @@ void handle_fs_cp(const void *arg)
     } else {
         shell_printf("cp failed (err %d)\r\n", res);
     }
+}
+
+/* WiFi Handlers ----------------------------------------------------------*/
+
+void handle_wifi_status(const void *arg)
+{
+    (void)arg;
+    static const char *state_names[] = {
+        "OFF", "INIT", "AP_READY", "LISTENING", "CONNECTED", "ERROR"
+    };
+    wifi_state_t st = wifi_get_state();
+    shell_printf("WiFi state: %s\r\n", state_names[st]);
+}
+
+void handle_wifi_send(const void *arg)
+{
+    (void)arg;
+    char *msg = wifi_get_send_buf();
+    if (wifi_get_state() != WIFI_STATE_CONNECTED) {
+        shell_print("WiFi not connected\r\n");
+        return;
+    }
+    if (wifi_send(msg))
+        shell_printf("[wifi] Sent: %s\r\n", msg);
+    else
+        shell_print("[wifi] Send failed\r\n");
+}
+
+void handle_wifi_poll(const void *arg)
+{
+    (void)arg;
+    if (wifi_get_state() != WIFI_STATE_CONNECTED) {
+        shell_print("WiFi not connected\r\n");
+        return;
+    }
+    char buf[256];
+    uint16_t len = wifi_poll(buf, sizeof(buf));
+    if (len > 0)
+        shell_printf("[wifi] Received: %s\r\n", buf);
+    else
+        shell_print("[wifi] No data\r\n");
+}
+
+void handle_wifi_accept(const void *arg)
+{
+    (void)arg;
+    if (wifi_get_state() != WIFI_STATE_LISTENING) {
+        shell_printf("WiFi not listening (state: %d)\r\n", wifi_get_state());
+        return;
+    }
+    shell_print("[wifi] Waiting for client (30s timeout)...\r\n");
+    if (!wifi_wait_for_accept(30000))
+        shell_print("[wifi] No client connected\r\n");
 }

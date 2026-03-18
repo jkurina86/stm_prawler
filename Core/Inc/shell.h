@@ -84,6 +84,12 @@ void cmd_sensors(int argc, char **argv);
 /* Config */
 void cmd_config(int argc, char **argv);
 
+/* WiFi */
+void cmd_wifi_status(int argc, char **argv);
+void cmd_wifi_send(int argc, char **argv);
+void cmd_wifi_poll(int argc, char **argv);
+void cmd_wifi_accept(int argc, char **argv);
+
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);
 void cmd_fs_unmount(int argc, char **argv);

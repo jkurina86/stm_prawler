@@ -81,6 +81,12 @@ void handle_sensors(const void *arg);
 /* Config */
 void handle_config(const void *arg);
 
+/* WiFi */
+void handle_wifi_status(const void *arg);
+void handle_wifi_send(const void *arg);
+void handle_wifi_poll(const void *arg);
+void handle_wifi_accept(const void *arg);
+
 /* File System */
 void handle_fs_mount(const void *arg);
 void handle_fs_unmount(const void *arg);

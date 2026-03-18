@@ -26,6 +26,7 @@
 #include "ctd.h"
 #include "optode.h"
 #include "wetlab.h"
+#include "wifi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -472,9 +473,10 @@ void DMA2_Channel4_IRQHandler(void)
 /* USER CODE BEGIN 1 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if (huart->Instance == USART1) {
+    if (huart->Instance == USART1)
         shell_uart_receive_callback();
-    }
+    else if (huart->Instance == UART4)
+        wifi_notify_rx_cplt();
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
