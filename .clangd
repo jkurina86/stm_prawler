@@ -1,22 +1,43 @@
-# Clangd configuration for STM32 project
-# Points clangd to the build directory containing compile_commands.json
+# Clangd configuration for STM32L476RG (ARM Cortex-M4) bare-metal project
+# This configuration helps clangd understand the target platform and suppresses
+# format warnings that don't apply to this embedded environment
 
 CompileFlags:
   # Tell clangd where to find compile_commands.json
   CompilationDatabase: build/Debug
 
-  # Fallback flags if compile_commands.json is not found
+  # Target-specific flags for ARM Cortex-M4 bare-metal
   Add:
+    # Target architecture
+    - "--target=arm-none-eabi"
+    - "-mcpu=cortex-m4"
+    - "-mfpu=fpv4-sp-d16"
+    - "-mfloat-abi=hard"
+
+    # C standard
+    - "-std=c11"
+
+    # HAL and CMSIS include paths
     - "-IDrivers/STM32L4xx_HAL_Driver/Inc"
     - "-IDrivers/STM32L4xx_HAL_Driver/Inc/Legacy"
     - "-IDrivers/CMSIS/Device/ST/STM32L4xx/Include"
     - "-IDrivers/CMSIS/Include"
+
+    # Application includes
     - "-ICore/Inc"
     - "-IFATFS/App"
     - "-IFATFS/Target"
     - "-IMiddlewares/Third_Party/FatFs/src"
+
+    # Preprocessor defines
     - "-DUSE_HAL_DRIVER"
     - "-DSTM32L476xx"
 
 Diagnostics:
+  # Suppress unused includes (common in embedded HAL libraries)
   UnusedIncludes: None
+
+  # Suppress format warnings - on ARM Cortex-M4, uint32_t (unsigned int) and
+  # unsigned long are both 32-bit, so using %lu for uint32_t is safe
+  Suppress:
+    - clang-diagnostic-format
