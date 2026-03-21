@@ -183,6 +183,7 @@ int main(void)
     shell_task();
     tasker_run();
     recorder_service();
+    wifi_service();
 
   }
   /* USER CODE END 3 */

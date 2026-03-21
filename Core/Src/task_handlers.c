@@ -705,7 +705,7 @@ void handle_wifi_status(const void *arg)
 {
     (void)arg;
     static const char *state_names[] = {
-        "OFF", "INIT", "AP_READY", "LISTENING", "CONNECTED", "ERROR"
+        "OFF", "INIT", "READY", "ERROR"
     };
     wifi_state_t st = wifi_get_state();
     shell_printf("WiFi state: %s\r\n", state_names[st]);
@@ -715,7 +715,7 @@ void handle_wifi_send(const void *arg)
 {
     (void)arg;
     char *msg = wifi_get_send_buf();
-    if (wifi_get_state() != WIFI_STATE_CONNECTED) {
+    if (wifi_get_state() != WIFI_STATE_READY) {
         shell_print("WiFi not connected\r\n");
         return;
     }
@@ -728,7 +728,7 @@ void handle_wifi_send(const void *arg)
 void handle_wifi_poll(const void *arg)
 {
     (void)arg;
-    if (wifi_get_state() != WIFI_STATE_CONNECTED) {
+    if (wifi_get_state() != WIFI_STATE_READY) {
         shell_print("WiFi not connected\r\n");
         return;
     }
@@ -740,14 +740,16 @@ void handle_wifi_poll(const void *arg)
         shell_print("[wifi] No data\r\n");
 }
 
-void handle_wifi_accept(const void *arg)
+void handle_wifi_reset(const void *arg)
 {
     (void)arg;
-    if (wifi_get_state() != WIFI_STATE_LISTENING) {
-        shell_printf("WiFi not listening (state: %d)\r\n", wifi_get_state());
-        return;
-    }
-    shell_print("[wifi] Waiting for client (30s timeout)...\r\n");
-    if (!wifi_wait_for_accept(30000))
-        shell_print("[wifi] No client connected\r\n");
+    shell_print("[wifi] Reinitializing...\r\n");
+    extern UART_HandleTypeDef huart4;
+    wifi_init(&huart4);
+}
+
+void handle_wifi_dump(const void *arg)
+{
+    (void)arg;
+    wifi_dump_ring();
 }

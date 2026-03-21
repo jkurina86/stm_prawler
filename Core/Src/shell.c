@@ -99,7 +99,8 @@ const shell_command_t shell_commands[] = {
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
     {"wifi-send", "Send message over WiFi", cmd_wifi_send},
     {"wifi-poll", "Poll for incoming WiFi message", cmd_wifi_poll},
-    {"wifi-accept", "Wait for TCP client connection", cmd_wifi_accept},
+    {"wifi-reset", "Reset WiFi module and reinitialize", cmd_wifi_reset},
+    {"wifi-dump", "Dump raw WiFi ring buffer contents", cmd_wifi_dump},
 
     {NULL, NULL, NULL} /* End marker */
 };
@@ -756,10 +757,16 @@ void cmd_wifi_poll(int argc, char **argv)
     tasker_enqueue(handle_wifi_poll, NULL, 0);
 }
 
-void cmd_wifi_accept(int argc, char **argv)
+void cmd_wifi_reset(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_accept, NULL, 0);
+    tasker_enqueue(handle_wifi_reset, NULL, 0);
+}
+
+void cmd_wifi_dump(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_wifi_dump, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/

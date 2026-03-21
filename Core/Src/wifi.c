@@ -3,9 +3,12 @@
   * @file    wifi.c
   * @brief   ISM4343-WBM-L54 WiFi module driver (AP mode, TCP server)
   * @note    UART4 at 115200 baud, interrupt-driven RX with ring buffer.
-  *          Hardware reset via PC6 (CLK_OE_Pin, active-low nRESET).
   *          AT command protocol: commands terminated with \r, responses
   *          terminated with "> " prompt.
+  *
+  *          Connection health is determined by R0 polling — there is no
+  *          explicit "socket connected" query on the ISM4343. R0 returns
+  *          -1 when the peer has disconnected.
   ******************************************************************************
   */
 
@@ -17,6 +20,7 @@
 /* Private defines -----------------------------------------------------------*/
 #define RX_RING_SIZE    512
 #define RESP_BUF_SIZE   512
+#define HEARTBEAT_INTERVAL_MS  30000   /* 30s between connection health checks */
 
 /* Private types -------------------------------------------------------------*/
 typedef struct {
@@ -31,6 +35,7 @@ static ring_buffer_t rx_ring;
 static uint8_t rx_byte;        /* single-byte target for HAL_UART_Receive_IT */
 static wifi_state_t state = WIFI_STATE_OFF;
 static char send_buf[256];      /* shared buffer for wifi-send shell command */
+static uint32_t heartbeat_tick;
 
 /* Ring buffer helpers -------------------------------------------------------*/
 
@@ -164,6 +169,59 @@ static void wifi_soft_reset(void)
     wifi_send_cmd("", resp, sizeof(resp), 2000);
 }
 
+/* Private helpers -----------------------------------------------------------*/
+
+/**
+ * @brief  Parse an R0 response and check connection health.
+ * @param  resp      Full R0 response string.
+ * @param  msg_buf   Buffer to store received data (may be NULL if not needed).
+ * @param  buf_size  Size of msg_buf.
+ * @return >0: bytes of data received, 0: no data (connection alive), -1: peer disconnected.
+ */
+static int wifi_parse_r0(const char *resp, char *msg_buf, uint16_t buf_size)
+{
+    char *data_start = strstr(resp, "\r\n");
+    if (!data_start)
+        return -1;
+    data_start += 2;
+
+    char *data_end = strstr(data_start, "\r\nOK\r\n");
+    if (!data_end)
+        return -1;
+
+    uint16_t data_len = (uint16_t)(data_end - data_start);
+
+    /* "-1" means peer disconnected */
+    if (data_len == 2 && data_start[0] == '-' && data_start[1] == '1')
+        return -1;
+
+    /* Empty = no data but connection alive */
+    if (data_len == 0)
+        return 0;
+
+    /* Copy received data if caller wants it */
+    if (msg_buf && buf_size > 0) {
+        if (data_len > buf_size - 1)
+            data_len = buf_size - 1;
+        memcpy(msg_buf, data_start, data_len);
+        msg_buf[data_len] = '\0';
+    }
+    return (int)data_len;
+}
+
+/**
+ * @brief  Restart TCP server after a detected disconnect.
+ */
+static void wifi_restart_tcp_server(void)
+{
+    shell_printf("[wifi] Client disconnected, restarting TCP server...\r\n");
+
+    char resp[RESP_BUF_SIZE];
+    wifi_send_cmd("P5=0", resp, sizeof(resp), 5000);
+
+    wifi_setup_tcp_server();
+}
+
 /* Public functions ----------------------------------------------------------*/
 
 void wifi_init(UART_HandleTypeDef *huart)
@@ -223,7 +281,6 @@ bool wifi_setup_ap(void)
 
     shell_printf("[wifi] AP started (SSID: %s, IP: %s)\r\n",
                  WIFI_AP_SSID, WIFI_AP_IP);
-    state = WIFI_STATE_AP_READY;
     return true;
 }
 
@@ -242,42 +299,21 @@ bool wifi_setup_tcp_server(void)
     if (!wifi_expect_ok("R2=1000",               "Set Read Timeout",     5000))
         return false;
 
-    /* P5=1 starts listening — module blocks until a client connects,
-       so we send it without waiting for the prompt. */
+    /* P5=1 starts listening. We don't wait for "Accepted" — instead
+       we go straight to READY and let R0 heartbeats detect whether
+       a client is actually connected. */
     rb_flush();
     wifi_send_str("P5=1\r");
 
-    shell_printf("[wifi] TCP server listening, waiting for client...\r\n");
-    state = WIFI_STATE_LISTENING;
+    shell_printf("[wifi] TCP server listening on port %s\r\n", WIFI_TCP_PORT);
+    state = WIFI_STATE_READY;
+    heartbeat_tick = HAL_GetTick();
     return true;
-}
-
-bool wifi_wait_for_accept(uint32_t timeout_ms)
-{
-    char resp[RESP_BUF_SIZE];
-    uint32_t start = HAL_GetTick();
-    uint16_t idx = 0;
-
-    while ((HAL_GetTick() - start) < timeout_ms) {
-        uint8_t byte;
-        if (rb_pop(&byte)) {
-            if (idx < sizeof(resp) - 1)
-                resp[idx++] = (char)byte;
-            resp[idx] = '\0';
-            if (strstr(resp, "Accepted") != NULL) {
-                shell_printf("[wifi] Client connected.\r\n");
-                state = WIFI_STATE_CONNECTED;
-                return true;
-            }
-        }
-    }
-    shell_printf("[wifi] Timed out waiting for client.\r\n");
-    return false;
 }
 
 bool wifi_send(const char *message)
 {
-    if (state != WIFI_STATE_CONNECTED)
+    if (state != WIFI_STATE_READY)
         return false;
 
     uint16_t len = strlen(message);
@@ -289,46 +325,88 @@ bool wifi_send(const char *message)
     HAL_Delay(50);      /* required gap before payload (per ISM4343 protocol) */
     wifi_send_bytes((const uint8_t *)message, len);
 
-    /* Read and discard the response */
     char resp[RESP_BUF_SIZE];
     wifi_read_until_prompt(resp, sizeof(resp), 5000);
+
+    if (strstr(resp, "ERROR")) {
+        wifi_restart_tcp_server();
+        return false;
+    }
     return true;
 }
 
 uint16_t wifi_poll(char *msg_buf, uint16_t buf_size)
 {
-    if (state != WIFI_STATE_CONNECTED)
+    if (state != WIFI_STATE_READY)
         return 0;
 
     char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("R0", resp, sizeof(resp), 3000);
-
-    /*
-     * Response format:
-     *   Data present:  \r\n<data>\r\nOK\r\n>
-     *   Empty read:    \r\n\r\nOK\r\n>
-     */
-    char *data_start = strstr(resp, "\r\n");
-    if (!data_start)
+    if (!wifi_send_cmd("R0", resp, sizeof(resp), 3000)) {
+        wifi_restart_tcp_server();
         return 0;
-    data_start += 2;
+    }
 
-    char *data_end = strstr(data_start, "\r\nOK\r\n");
-    if (!data_end)
+    int result = wifi_parse_r0(resp, msg_buf, buf_size);
+    if (result < 0) {
+        wifi_restart_tcp_server();
         return 0;
+    }
+    return (uint16_t)result;
+}
 
-    uint16_t data_len = (uint16_t)(data_end - data_start);
+/* Debug ---------------------------------------------------------------------*/
 
-    /* Skip if empty or "-1" (no data available) */
-    if (data_len == 0)
-        return 0;
-    if (data_len == 2 && data_start[0] == '-' && data_start[1] == '1')
-        return 0;
+void wifi_dump_ring(void)
+{
+    shell_printf("[wifi] Ring: head=%u tail=%u\r\n", rx_ring.head, rx_ring.tail);
+    uint8_t byte;
+    uint16_t count = 0;
+    while (rb_pop(&byte)) {
+        if (byte >= 0x20 && byte < 0x7F)
+            shell_printf("%c", byte);
+        else
+            shell_printf("\\x%02X", byte);
+        count++;
+    }
+    if (count > 0)
+        shell_printf("\r\n");
+    else
+        shell_printf("[wifi] Ring buffer empty\r\n");
+}
 
-    if (data_len > buf_size - 1)
-        data_len = buf_size - 1;
+/* Main-loop service ---------------------------------------------------------*/
 
-    memcpy(msg_buf, data_start, data_len);
-    msg_buf[data_len] = '\0';
-    return data_len;
+/**
+ * @brief  Non-blocking service function, call from main loop.
+ *
+ *  READY: sends R0 heartbeat every 30s. If R0 returns -1 or ERROR
+ *         the TCP session is dead — closes socket and restarts server.
+ *         If R0 returns data, prints it so it isn't silently lost.
+ */
+void wifi_service(void)
+{
+    if (state != WIFI_STATE_READY)
+        return;
+
+    if ((HAL_GetTick() - heartbeat_tick) < HEARTBEAT_INTERVAL_MS)
+        return;
+    heartbeat_tick = HAL_GetTick();
+
+    char resp[RESP_BUF_SIZE];
+    if (!wifi_send_cmd("R0", resp, sizeof(resp), 5000)) {
+        /* R0 returned ERROR — connection is dead */
+        wifi_restart_tcp_server();
+        return;
+    }
+
+    char msg[256];
+    int result = wifi_parse_r0(resp, msg, sizeof(msg));
+    if (result < 0) {
+        /* -1 means peer disconnected */
+        wifi_restart_tcp_server();
+        return;
+    }
+    if (result > 0) {
+        shell_printf("[wifi] Received: %s\r\n", msg);
+    }
 }
