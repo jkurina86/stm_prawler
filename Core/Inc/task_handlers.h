@@ -21,10 +21,6 @@ typedef struct {
 } reset_args_t;
 
 typedef struct {
-    uint8_t uart_num;
-} hello_args_t;
-
-typedef struct {
     uint16_t year;
     uint8_t months;
     uint8_t days;
@@ -52,8 +48,6 @@ void handle_clear(const void *arg);
 void handle_status(const void *arg);
 void handle_reset(const void *arg);
 void handle_version(const void *arg);
-void handle_systime(const void *arg);
-void handle_hello(const void *arg);
 
 /* RTC */
 void handle_rtc_settime(const void *arg);

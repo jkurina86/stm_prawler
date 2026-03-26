@@ -267,6 +267,7 @@ uint8_t RTC_BCD2Bin(uint8_t bcd);
 uint8_t RTC_Bin2BCD(uint8_t bin);
 bool RTC_IsLeapYear(uint16_t year);
 uint8_t RTC_GetDaysInMonth(uint8_t month, uint16_t year);
+uint32_t RTC_ToGPSEpoch(const RTC_DateTime_t *dt);
 
 #ifdef __cplusplus
 }

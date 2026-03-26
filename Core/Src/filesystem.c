@@ -13,7 +13,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 static FATFS fs;                        /* File system object */
-static FIL fil;                         /* File object */
+static FIL fil;                         /* File object for shell commands */
+static FIL log_fil;                     /* File object for recorder log */
 static char fs_path[128] = "0:";        /* Current file system path */
 static FRESULT fs_result;               /* File operation result */
 static volatile uint8_t fs_mounted = 0; /* File system mounted flag */
@@ -357,27 +358,62 @@ FS_Result_t filesystem_cp(const char *source, const char *destination) {
 }
 
 /**
-  * @brief Open the log file for appending
-  * @param log_file: Pointer to FIL object for the log file
-  * @param filename: Name of the log file to open
+  * @brief Create a new log file (fails if file already exists)
+  * @param filename: Name of the log file to create
+  * @retval FS_Result_t: FS_OK, FS_FILE_EXISTS, or error
+  */
+FS_Result_t filesystem_log_create(const char *filename) {
+    if (!fs_mounted) return FS_NOT_MOUNTED;
+    if (!filename)   return FS_INVALID_PARAM;
+
+    fs_result = f_open(&log_fil, filename, FA_WRITE | FA_CREATE_NEW);
+    if (fs_result == FR_OK)    return FS_OK;
+    if (fs_result == FR_EXIST) return FS_FILE_EXISTS;
+    return convert_fatfs_result(fs_result);
+}
+
+/**
+  * @brief Write data to the open log file
+  * @param data: Buffer to write
+  * @param len:  Number of bytes to write
   * @retval FS_Result_t: Operation result
   */
-FS_Result_t filesystem_open_log(FIL* log_file, const char* filename) {
-    if (!fs_mounted) {
-        return FS_NOT_MOUNTED;
-    }
-    
-    if (!log_file || !filename) {
-        return FS_INVALID_PARAM;
-    }
-    
-    /* Open for writing, create if doesn't exist, append if exists */
-    fs_result = f_open(log_file, filename, FA_WRITE | FA_OPEN_APPEND | FA_OPEN_ALWAYS);
-    if (fs_result == FR_OK) {
-        return FS_OK;
-    }
-    
-    return convert_fatfs_result(fs_result);
+FS_Result_t filesystem_log_write(const uint8_t *data, uint16_t len) {
+    UINT bw;
+    fs_result = f_write(&log_fil, data, len, &bw);
+    if (fs_result != FR_OK || bw != len) return FS_ERROR;
+    return FS_OK;
+}
+
+/**
+  * @brief Sync (flush) the open log file to disk
+  * @retval FS_Result_t: Operation result
+  */
+FS_Result_t filesystem_log_sync(void) {
+    fs_result = f_sync(&log_fil);
+    return (fs_result == FR_OK) ? FS_OK : FS_ERROR;
+}
+
+/**
+  * @brief Close the open log file
+  * @retval FS_Result_t: Operation result
+  */
+FS_Result_t filesystem_log_close(void) {
+    fs_result = f_close(&log_fil);
+    return (fs_result == FR_OK) ? FS_OK : FS_ERROR;
+}
+
+/**
+  * @brief Delete a file by name
+  * @param filename: Name of the file to delete
+  * @retval FS_Result_t: Operation result
+  */
+FS_Result_t filesystem_log_delete(const char *filename) {
+    if (!fs_mounted) return FS_NOT_MOUNTED;
+    if (!filename)   return FS_INVALID_PARAM;
+
+    fs_result = f_unlink(filename);
+    return (fs_result == FR_OK) ? FS_OK : convert_fatfs_result(fs_result);
 }
 
 

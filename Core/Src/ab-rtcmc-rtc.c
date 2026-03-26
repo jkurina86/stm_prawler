@@ -947,3 +947,41 @@ uint8_t RTC_GetDaysInMonth(uint8_t month, uint16_t year) {
 
     return days_in_month[month - 1];
 }
+
+/**
+  * @brief  Convert RTC date/time to GPS epoch seconds
+  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-99, meaning 2000-2099)
+  * @retval Seconds since GPS epoch (Jan 6, 1980 00:00:00 UTC)
+  */
+uint32_t RTC_ToGPSEpoch(const RTC_DateTime_t *dt)
+{
+    static const uint16_t days_before_month[] = {
+        0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
+    };
+
+    uint16_t year = 2000 + dt->years;
+
+    /* Days from Jan 1 1980 to Jan 1 of target year */
+    uint32_t days = 0;
+    for (uint16_t y = 1980; y < year; y++) {
+        days += RTC_IsLeapYear(y) ? 366 : 365;
+    }
+
+    /* Add days for completed months in target year */
+    if (dt->months >= 1 && dt->months <= 12) {
+        days += days_before_month[dt->months - 1];
+    }
+
+    /* Add leap day if past Feb in a leap year */
+    if (dt->months > 2 && RTC_IsLeapYear(year)) {
+        days += 1;
+    }
+
+    /* Add day of month (1-based) */
+    days += dt->days - 1;
+
+    /* Subtract 5 days to shift from Jan 1 to Jan 6 */
+    days -= 5;
+
+    return days * 86400UL + dt->hours * 3600UL + dt->minutes * 60UL + dt->seconds;
+}

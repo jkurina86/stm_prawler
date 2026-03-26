@@ -54,8 +54,6 @@ const shell_command_t shell_commands[] = {
     {"status", "Show system status", cmd_status},
     {"reset", "Reset the system", cmd_reset},
     {"version", "Show firmware version", cmd_version},
-    {"systime", "Show current system time", cmd_systime},
-    {"hello", "Send hello to UART (1-5)", cmd_hello},
 
     /* RTC Commands */
     {"rtc-settime", "Set RTC date/time (YYYY MM DD HH MM SS)", cmd_rtc_settime},
@@ -334,41 +332,6 @@ void cmd_version(int argc, char **argv)
 {
     (void)argc; (void)argv; /* Unused args */
     tasker_enqueue(handle_version, NULL, 0);
-}
-
-/**
-  * @brief Send hello message to specified UART
-  * @param argc: Argument count
-  * @param argv: Arguments (UART number 1-5)
-  * @retval None
-  */
-void cmd_hello(int argc, char **argv)
-{
-    /* Validate arguments silently - any error messages will be handled by the task */
-    if (argc != 2) {
-        return;
-    }
-    
-    int uart_num = atoi(argv[1]);
-    
-    if (uart_num < 1 || uart_num > 5) {
-        return;
-    }
-
-    hello_args_t args = { .uart_num = (uint8_t)uart_num };
-    tasker_enqueue(handle_hello, &args, sizeof(args));
-}
-
-/**
-  * @brief Show current system time (epoch + ISO 8601)
-  * @param argc: Argument count
-  * @param argv: Arguments
-  * @retval None
-  */
-void cmd_systime(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_systime, NULL, 0);
 }
 
 /* RTC Commands -----------------------------------------------*/

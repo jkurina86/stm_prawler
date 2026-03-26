@@ -12,7 +12,6 @@ extern "C" {
 #endif
 
 /* Includes ------------------------------------------------------------------*/
-#include "ff.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -25,6 +24,7 @@ typedef enum {
     FS_ALREADY_MOUNTED,
     FS_INVALID_PARAM,
     FS_FILE_NOT_FOUND,
+    FS_FILE_EXISTS,
     FS_ACCESS_DENIED
 } FS_Result_t;
 
@@ -62,7 +62,11 @@ FS_Result_t filesystem_rm(const char *filename);
 FS_Result_t filesystem_cp(const char *source, const char *destination);
 
 /* Log file operations for recorder */
-FS_Result_t filesystem_open_log(FIL* log_file, const char* filename);
+FS_Result_t filesystem_log_create(const char *filename);
+FS_Result_t filesystem_log_write(const uint8_t *data, uint16_t len);
+FS_Result_t filesystem_log_sync(void);
+FS_Result_t filesystem_log_close(void);
+FS_Result_t filesystem_log_delete(const char *filename);
 
 /* Buffer management for shell integration */
 FS_Buffers_t* filesystem_get_buffers(void);

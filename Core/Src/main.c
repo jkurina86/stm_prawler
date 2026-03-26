@@ -76,8 +76,6 @@ DMA_HandleTypeDef hdma_usart3_tx;
 
 /* USER CODE BEGIN PV */
 
-volatile bool start_flag = false;
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -161,11 +159,27 @@ int main(void)
   config_init();
   transceiver_init();
   tasker_init();
+
   filesystem_init();
+  if (filesystem_mount() == FS_OK) {
+      g_app.sd_status = PERIPH_READY;
+  } else {
+      g_app.sd_status = PERIPH_ERROR;
+      shell_printf("SD card mount failed\r\n");
+  }
+
   RTC_Init();
+  g_app.rtc_status = PERIPH_READY;
+
   ctd_init(&huart3);
+  g_app.ctd_status = PERIPH_READY;
+
   optode_init(&huart2);
+  g_app.optode_status = PERIPH_READY;
+
   wetlab_init(&huart5);
+  g_app.wetlab_status = PERIPH_READY;
+
   recorder_init();
   wifi_init(&huart4);
   shell_init();

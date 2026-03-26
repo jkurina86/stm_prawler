@@ -55,9 +55,6 @@ void cmd_clear(int argc, char **argv);
 void cmd_status(int argc, char **argv);
 void cmd_reset(int argc, char **argv);
 void cmd_version(int argc, char **argv);
-void cmd_hello(int argc, char **argv);
-void cmd_systime(int argc, char **argv);
-
 /* RTC Command functions */
 void cmd_rtc_settime(int argc, char **argv);
 void cmd_rtc_gettime(int argc, char **argv);

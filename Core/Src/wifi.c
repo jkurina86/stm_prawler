@@ -13,6 +13,7 @@
   */
 
 #include "wifi.h"
+#include "config.h"
 #include "shell.h"
 #include <string.h>
 #include <stdio.h>
@@ -229,6 +230,7 @@ void wifi_init(UART_HandleTypeDef *huart)
     wifi_huart = huart;
     rb_init();
     state = WIFI_STATE_INIT;
+    g_app.wifi_state = (uint8_t)state;
 
     /* Start single-byte interrupt reception */
     HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
@@ -237,11 +239,13 @@ void wifi_init(UART_HandleTypeDef *huart)
 
     if (!wifi_setup_ap()) {
         state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
         return;
     }
 
     if (!wifi_setup_tcp_server()) {
         state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
         return;
     }
 }
@@ -307,6 +311,7 @@ bool wifi_setup_tcp_server(void)
 
     shell_printf("[wifi] TCP server listening on port %s\r\n", WIFI_TCP_PORT);
     state = WIFI_STATE_READY;
+    g_app.wifi_state = (uint8_t)state;
     heartbeat_tick = HAL_GetTick();
     return true;
 }

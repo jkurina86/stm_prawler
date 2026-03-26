@@ -13,12 +13,9 @@
 #include "shell.h"
 #include "filesystem.h"
 #include "ab-rtcmc-rtc.h"
-#include "ctd.h"
-#include "optode.h"
+#include "sensors.h"
 #include "stm32l4xx_hal.h"
-#include "wetlab.h"
 #include "config.h"
-#include "ff.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -39,7 +36,6 @@ static uint8_t rec_buf[2][REC_BUF_SIZE];
 static uint8_t active_buf;
 static uint16_t buf_offset;
 
-static FIL rec_file;
 static rec_state_t state;
 static uint32_t start_time;
 static bool first_sample;
@@ -51,53 +47,7 @@ static uint32_t next_sample_tick;
 static uint16_t file_counter;
 static char rec_filename[16];
 
-ctd_data_t ctd = {0};
-optode_data_t optode = {0};
-wetlab_data_t wetlab = {0};
-
-/* start_flag set by EXTI ISR on PB8 rising edge (owned by main.c) */
-extern volatile bool start_flag;
-
-/* GPS epoch helpers ---------------------------------------------------------*/
-
-static bool is_leap_year(uint16_t year)
-{
-    return (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
-}
-
-static uint32_t rtc_to_gps_epoch(const RTC_DateTime_t *dt)
-{
-    /* GPS epoch: Jan 6, 1980 00:00:00 UTC */
-    static const uint16_t days_before_month[] = {
-        0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
-    };
-
-    uint16_t year = 2000 + dt->years;
-
-    /* Days from Jan 1 1980 to Jan 1 of target year */
-    uint32_t days = 0;
-    for (uint16_t y = 1980; y < year; y++) {
-        days += is_leap_year(y) ? 366 : 365;
-    }
-
-    /* Add days for completed months in target year */
-    if (dt->months >= 1 && dt->months <= 12) {
-        days += days_before_month[dt->months - 1];
-    }
-
-    /* Add leap day if past Feb in a leap year */
-    if (dt->months > 2 && is_leap_year(year)) {
-        days += 1;
-    }
-
-    /* Add day of month (1-based) */
-    days += dt->days - 1;
-
-    /* Subtract 5 days to shift from Jan 1 to Jan 6 */
-    days -= 5;
-
-    return days * 86400UL + dt->hours * 3600UL + dt->minutes * 60UL + dt->seconds;
-}
+static sensor_reading_t reading;
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -107,7 +57,7 @@ static uint32_t get_timestamp(void)
     if (RTC_GetDateTime(&dt) != RTC_OK) {
         return 0;
     }
-    return rtc_to_gps_epoch(&dt);
+    return RTC_ToGPSEpoch(&dt);
 }
 
 static bool flush_buffer(const uint8_t *buf, uint16_t len)
@@ -115,16 +65,13 @@ static bool flush_buffer(const uint8_t *buf, uint16_t len)
     if (len == 0)
         return true;
 
-    UINT bw;
-    FRESULT fr = f_write(&rec_file, buf, len, &bw);
-    if (fr != FR_OK || bw != len) {
-        shell_printf("[recorder] Write error (fr=%d, wrote %u/%u)\r\n", fr, bw, len);
+    if (filesystem_log_write(buf, len) != FS_OK) {
+        shell_print("[recorder] Write error\r\n");
         return false;
     }
 
-    fr = f_sync(&rec_file);
-    if (fr != FR_OK) {
-        shell_printf("[recorder] Sync error (fr=%d)\r\n", fr);
+    if (filesystem_log_sync() != FS_OK) {
+        shell_print("[recorder] Sync error\r\n");
         return false;
     }
 
@@ -148,8 +95,8 @@ static bool open_log_file(void)
 
         snprintf(rec_filename, sizeof(rec_filename), "rec_%04u.csv", file_counter);
 
-        FRESULT fr = f_open(&rec_file, rec_filename, FA_WRITE | FA_CREATE_NEW);
-        if (fr == FR_OK) {
+        FS_Result_t res = filesystem_log_create(rec_filename);
+        if (res == FS_OK) {
             /* Write CSV header */
             static const char hdr[] =
                 "ProfileNo,GPS_Epoch_UTC,CTD_C,CTD_T,CTD_D,"
@@ -157,51 +104,21 @@ static bool open_log_file(void)
                 "Optode_C1_Ph,Optode_C2_Ph,Optode_C1_Amp,Optode_C2_Amp,Optode_Temp_raw,"
                 "Wetlab_C1_lambda,Wetlab_C1_signal,Wetlab_C2_lambda,Wetlab_C2_signal,"
                 "Wetlab_C3_lambda,Wetlab_C3_signal,Wetlab_Therm\r\n";
-            UINT bw;
-            f_write(&rec_file, hdr, sizeof(hdr) - 1, &bw);
-            f_sync(&rec_file);
+            filesystem_log_write((const uint8_t *)hdr, sizeof(hdr) - 1);
+            filesystem_log_sync();
             return true;
         }
-        if (fr != FR_EXIST) {
-            shell_printf("[recorder] Open failed (fr=%d)\r\n", fr);
+        if (res != FS_FILE_EXISTS) {
+            shell_print("[recorder] Open failed\r\n");
             return false;
         }
-        /* FR_EXIST — try next number */
+        /* FS_FILE_EXISTS — try next number */
     }
 }
 
-static void sample_sensors(void)
+static void sample_and_record(void)
 {
-    /* Same sequence as handle_sensors, guarded by sensor config */
-    bool has_optode = config_has_optode();
-    bool has_wetlab = config_has_wetlab();
-
-    if (has_wetlab)
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);  /* WetLab power on */
-
-    if (has_optode)
-        optode_wake();
-    ctd_wakeup();
-
-    ctd_fire();
-    if (has_optode)
-        optode_fire();
-
-    HAL_Delay(1500);
-
-    if (has_wetlab)
-        wetlab_fire();
-
-    HAL_Delay(1200);
-
-    ctd_collect(&ctd);
-    if (has_optode)
-        optode_collect(&optode);
-    if (has_wetlab)
-        wetlab_collect(&wetlab);
-
-    if (has_wetlab)
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);  /* WetLab power off */
+    sensors_sample(&reading);
 
     /* Format CSV line */
     uint32_t ts = get_timestamp();
@@ -211,14 +128,15 @@ static void sample_sensors(void)
         "%f,%f,%f,%f,%f,%f,%f,%f,%f,"
         "%u,%u,%u,%u,%u,%u,%u\r\n",
         record_num, ts,
-        ctd.conductivity, ctd.temperature, ctd.pressure,
-        optode.o2_concentration, optode.temperature, optode.cal_phase,
-        optode.tc_phase, optode.c1_rph, optode.c2_rph,
-        optode.c1_amp, optode.c2_amp, optode.raw_temp,
-        wetlab.chl_lambda, wetlab.chl_signal,
-        wetlab.ntu_lambda, wetlab.ntu_signal,
-        wetlab.cdom_lambda, wetlab.cdom_signal,
-        wetlab.thermistor);
+        reading.ctd.conductivity, reading.ctd.temperature, reading.ctd.pressure,
+        reading.optode.o2_concentration, reading.optode.temperature,
+        reading.optode.cal_phase, reading.optode.tc_phase,
+        reading.optode.c1_rph, reading.optode.c2_rph,
+        reading.optode.c1_amp, reading.optode.c2_amp, reading.optode.raw_temp,
+        reading.wetlab.chl_lambda, reading.wetlab.chl_signal,
+        reading.wetlab.ntu_lambda, reading.wetlab.ntu_signal,
+        reading.wetlab.cdom_lambda, reading.wetlab.cdom_signal,
+        reading.wetlab.thermistor);
 
     if (line_len < 0 || (size_t)line_len >= sizeof(line_buf))
         line_len = sizeof(line_buf) - 1;
@@ -251,8 +169,8 @@ void recorder_service(void)
     switch (state) {
 
     case REC_IDLE:
-        if (start_flag) {
-            start_flag = false;
+        if (g_app.start_flag) {
+            g_app.start_flag = false;
 
             if (!open_log_file()) {
                 return;
@@ -265,15 +183,16 @@ void recorder_service(void)
             shell_printf("[recorder] Started: %s\r\n", rec_filename);
 
             /* Take first sample immediately */
-            sample_sensors();
+            sample_and_record();
             sample_count = 0;
             first_sample = false;
             next_sample_tick = HAL_GetTick() + SAMPLE_INTERVAL;
             start_time = HAL_GetTick();
-            initial_depth = ctd.pressure;
-            max_pressure = ctd.pressure;
+            initial_depth = reading.ctd.pressure;
+            max_pressure = reading.ctd.pressure;
 
             state = REC_RECORDING;
+            g_app.mode = SYS_MODE_RECORDING;
         }
         break;
 
@@ -282,14 +201,15 @@ void recorder_service(void)
         if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET) {
             /* Flush remaining data */
             flush_buffer(rec_buf[active_buf], buf_offset);
-            f_close(&rec_file);
+            filesystem_log_close();
 
             shell_printf("[recorder] Stopped. %lu records saved to %s\r\n",
                          record_num, rec_filename);
 
             __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
-            start_flag = false;
+            g_app.start_flag = false;
             state = REC_IDLE;
+            g_app.mode = SYS_MODE_IDLE;
             first_sample = true;
             start_time = 0;
             return;
@@ -297,27 +217,28 @@ void recorder_service(void)
 
         /* Time for next sample? */
         if ((HAL_GetTick() - next_sample_tick) < 0x80000000UL) {
-            sample_sensors();
+            sample_and_record();
             sample_count++;
             next_sample_tick += SAMPLE_INTERVAL;
 
             /* False start detection during validation window */
             if (sample_count <= FALSE_START_SAMPLES) {
-                if (ctd.pressure > max_pressure)
-                    max_pressure = ctd.pressure;
+                if (reading.ctd.pressure > max_pressure)
+                    max_pressure = reading.ctd.pressure;
 
                 if (sample_count == FALSE_START_SAMPLES &&
                     max_pressure <= initial_depth + TOLERANCE) {
                     /* No significant descent — discard recording */
-                    f_close(&rec_file);
-                    f_unlink(rec_filename);
+                    filesystem_log_close();
+                    filesystem_log_delete(rec_filename);
                     shell_printf("[recorder] False start — file %s removed\r\n",
                                  rec_filename);
-                    /* Clear any pending EXTI/start_flag so we don't
+                    /* Clear any pending EXTI/g_app.start_flag so we don't
                        immediately re-trigger while PB8 is still HIGH */
                     __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
-                    start_flag = false;
+                    g_app.start_flag = false;
                     state = REC_IDLE;
+                    g_app.mode = SYS_MODE_IDLE;
                     first_sample = true;
                     start_time = 0;
                     return;

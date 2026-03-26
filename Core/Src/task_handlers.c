@@ -13,9 +13,7 @@
 #include "tasker.h"
 #include "filesystem.h"
 #include "ab-rtcmc-rtc.h"
-#include "ctd.h"
-#include "optode.h"
-#include "wetlab.h"
+#include "sensors.h"
 #include "config.h"
 #include "wifi.h"
 #include <string.h>
@@ -63,9 +61,20 @@ void handle_clear(const void *arg)
 void handle_status(const void *arg)
 {
     (void)arg;
-    shell_printf("System uptime: %lu ms\r\n", HAL_GetTick());
-    shell_printf("Tasks pending: %u\r\n", tasker_pending_count());
-    shell_printf("FS mounted:    %s\r\n", filesystem_is_mounted() ? "yes" : "no");
+    static const char *mode_names[]   = {"IDLE", "RECORDING"};
+    static const char *periph_names[] = {"OFF", "READY", "ERROR"};
+    static const char *wifi_names[]   = {"OFF", "INIT", "READY", "ERROR"};
+
+    shell_printf("Mode:       %s\r\n", mode_names[g_app.mode]);
+    shell_printf("Uptime:     %lu ms\r\n", HAL_GetTick());
+    shell_printf("Tasks:      %u pending\r\n", tasker_pending_count());
+    shell_printf("SD/FS:      %s\r\n", periph_names[g_app.sd_status]);
+    shell_printf("RTC:        %s\r\n", periph_names[g_app.rtc_status]);
+    shell_printf("CTD:        %s\r\n", periph_names[g_app.ctd_status]);
+    shell_printf("Optode:     %s\r\n", periph_names[g_app.optode_status]);
+    shell_printf("WetLab:     %s\r\n", periph_names[g_app.wetlab_status]);
+    shell_printf("WiFi:       %s\r\n", wifi_names[g_app.wifi_state]);
+    shell_printf("Sensors:    level %u\r\n", g_app.sensor_level);
 }
 
 /** @brief  Handle the "reset" command
@@ -93,46 +102,6 @@ void handle_version(const void *arg)
 {
     (void)arg;
     shell_printf("Firmware version: %s\r\n", FW_VERSION);
-}
-
-/** @brief  Handle the "systime" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_systime(const void *arg)
-{
-    (void)arg;
-    uint32_t tick = HAL_GetTick();
-    uint32_t sec = tick / 1000;
-    uint32_t min = sec / 60;
-    uint32_t hrs = min / 60;
-    shell_printf("System tick: %lu ms (%lu:%02lu:%02lu)\r\n",
-                 tick, hrs, min % 60, sec % 60);
-}
-
-/** @brief  Handle the "hello" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_hello(const void *arg)
-{
-    const hello_args_t *a = (const hello_args_t *)arg;
-    const char *msg = "Hello from STM Prawler!\r\n";
-    UART_HandleTypeDef *uart = NULL;
-
-    switch (a->uart_num) {
-        case 1: uart = &huart1; break;
-        case 2: uart = &huart2; break;
-        case 3: uart = &huart3; break;
-        case 4: uart = &huart4; break;
-        case 5: uart = &huart5; break;
-        default:
-            shell_print("Invalid UART number (1-5)\r\n");
-            return;
-    }
-
-    HAL_UART_Transmit(uart, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
-    shell_printf("Sent hello on UART%u\r\n", a->uart_num);
 }
 
 /* RTC Handlers -----------------------------------------------------------*/
@@ -367,82 +336,42 @@ void handle_wetlab_raw(const void *arg)
 void handle_sensors(const void *arg)
 {
     (void)arg;
-    ctd_data_t ctd = {0};
-    optode_data_t optode = {0};
-    wetlab_data_t wetlab = {0};
-    bool ctd_ok = false, optode_ok = false, wetlab_ok = false;
     bool has_optode = config_has_optode();
     bool has_wetlab = config_has_wetlab();
 
-    /* 1. Capture t0, power on WetLab immediately */
     uint32_t t0 = HAL_GetTick();
-    if (has_wetlab)
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-
-    /* 2. Wake optode and CTD while WetLab boots (~1s overlaps with 1.5s boot) */
-    if (has_optode)
-        optode_wake();
-
-    if (!ctd_wakeup())
-        shell_print("[sensors] CTD wakeup failed\r\n");
-
-    /* 3. Fire CTD and Optode */
-    if (!ctd_fire())
-        shell_print("[sensors] CTD fire failed\r\n");
-
-    if (has_optode && !optode_fire())
-        shell_print("[sensors] Optode fire failed\r\n");
-
-    /* 4. Wait until t0+1500 ms for WetLab to start auto-transmitting */
-    HAL_Delay(1500);
-
-    /* 5. Fire WetLab */
-    if (has_wetlab && !wetlab_fire())
-        shell_print("[sensors] WetLab fire failed\r\n");
-
-    /* 6. Spin until t0+3500 ms */
-    HAL_Delay(1200);
-
-    /* 7. Collect results */
-    ctd_ok = ctd_collect(&ctd);
-    if (has_optode)
-        optode_ok = optode_collect(&optode);
-    if (has_wetlab)
-        wetlab_ok = wetlab_collect(&wetlab);
-
-    /* 8. Power off WetLab */
-    if (has_wetlab)
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
-
-    /* 8.5. Print time elapsed */
+    sensor_reading_t reading;
+    sensors_sample(&reading);
     uint32_t elapsed = HAL_GetTick() - t0;
+
     shell_printf("[sensors] Time elapsed: %lu ms\r\n", elapsed);
 
-    /* 9. Print results */
-    if (ctd_ok) {
+    if (reading.ctd_ok) {
         shell_printf("[CTD] C=%.4f T=%.4f P=%.5f\r\n",
-                     ctd.conductivity, ctd.temperature, ctd.pressure);
+                     reading.ctd.conductivity, reading.ctd.temperature,
+                     reading.ctd.pressure);
     } else {
         shell_print("[CTD] FAILED\r\n");
     }
 
     if (has_optode) {
-        if (optode_ok) {
+        if (reading.optode_ok) {
             shell_printf("[Optode] O2=%.3f uM  T=%.3f C  CalPh=%.3f\r\n",
-                         optode.o2_concentration, optode.temperature,
-                         optode.cal_phase);
+                         reading.optode.o2_concentration,
+                         reading.optode.temperature,
+                         reading.optode.cal_phase);
         } else {
             shell_print("[Optode] FAILED\r\n");
         }
     }
 
     if (has_wetlab) {
-        if (wetlab_ok) {
+        if (reading.wetlab_ok) {
             shell_printf("[WetLab] CHL=%u@%unm  NTU=%u@%unm  CDOM=%u@%unm  Therm=%u\r\n",
-                         wetlab.chl_signal, wetlab.chl_lambda,
-                         wetlab.ntu_signal, wetlab.ntu_lambda,
-                         wetlab.cdom_signal, wetlab.cdom_lambda,
-                         wetlab.thermistor);
+                         reading.wetlab.chl_signal, reading.wetlab.chl_lambda,
+                         reading.wetlab.ntu_signal, reading.wetlab.ntu_lambda,
+                         reading.wetlab.cdom_signal, reading.wetlab.cdom_lambda,
+                         reading.wetlab.thermistor);
         } else {
             shell_print("[WetLab] FAILED\r\n");
         }
