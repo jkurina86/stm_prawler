@@ -61,7 +61,7 @@ void handle_clear(const void *arg)
 void handle_status(const void *arg)
 {
     (void)arg;
-    static const char *mode_names[]   = {"IDLE", "RECORDING"};
+    static const char *mode_names[]   = {"IDLE", "RECORDING", "NORMALIZING"};
     static const char *periph_names[] = {"OFF", "READY", "ERROR"};
     static const char *wifi_names[]   = {"OFF", "INIT", "READY", "ERROR"};
 
@@ -376,6 +376,14 @@ void handle_sensors(const void *arg)
             shell_print("[WetLab] FAILED\r\n");
         }
     }
+}
+
+/* Normalization Handlers -------------------------------------------------*/
+
+void handle_normalize(const void *arg)
+{
+    (void)arg;
+    optode_normalize_start();
 }
 
 /* Config Handlers --------------------------------------------------------*/

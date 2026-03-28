@@ -78,6 +78,9 @@ const shell_command_t shell_commands[] = {
     /* Simultaneous Sampling */
     {"sensors", "Sample all sensors simultaneously", cmd_sensors},
 
+    /* Normalization */
+    {"optode-norm", "Start optode normalization (10 min)", cmd_optode_norm},
+
     /* Config */
     {"config", "Get/set sensor config (1-3)", cmd_config},
 
@@ -666,6 +669,14 @@ void cmd_sensors(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_sensors, NULL, 0);
+}
+
+/* Normalization Commands ------------------------------------------*/
+
+void cmd_optode_norm(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_normalize, NULL, 0);
 }
 
 /* Config Commands ------------------------------------------------*/

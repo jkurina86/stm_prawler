@@ -8,9 +8,13 @@
   */
 
 #include "optode.h"
+#include "config.h"
+#include "filesystem.h"
+#include "ab-rtcmc-rtc.h"
 #include "shell.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 /* Private variables ---------------------------------------------------------*/
 static UART_HandleTypeDef *optode_huart;
@@ -486,4 +490,97 @@ void optode_listen(void)
     HAL_UART_Init(optode_huart);
 
     shell_printf("\r\n[optode] No match at any baud rate.\r\n");
+}
+
+/* Normalization -------------------------------------------------------------*/
+
+#define NORM_SAMPLE_INTERVAL_MS   20000
+#define NORM_TOTAL_SAMPLES           30
+
+static bool     norm_active;
+static uint32_t norm_next_tick;
+static uint16_t norm_count;
+
+void optode_normalize_init(void)
+{
+    norm_active = false;
+}
+
+void optode_normalize_start(void)
+{
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_print("[norm] Cannot start — system is busy\r\n");
+        return;
+    }
+
+    /* Build filename: optode_normalize_ddmmyyyy.csv */
+    RTC_DateTime_t dt = {0};
+    RTC_GetDateTime(&dt);
+
+    char filename[40];
+    snprintf(filename, sizeof(filename), "optode_normalize_%02u%02u%04u.csv",
+             dt.days, dt.months, 2000 + dt.years);
+
+    FS_Result_t res = filesystem_log_create(filename);
+    if (res != FS_OK) {
+        shell_printf("[norm] Cannot create %s (err=%d)\r\n", filename, res);
+        return;
+    }
+
+    /* Write CSV header */
+    static const char hdr[] =
+        "Sample,O2_uM,Temp_C,CalPhase,TcPhase,C1RPh,C2RPh,C1Amp,C2Amp,RawTemp\r\n";
+    filesystem_log_write((const uint8_t *)hdr, sizeof(hdr) - 1);
+    filesystem_log_sync();
+
+    norm_active = true;
+    norm_count = 0;
+    g_app.mode = SYS_MODE_NORMALIZING;
+    norm_next_tick = HAL_GetTick();
+
+    shell_printf("[norm] Started: %s (%u samples, every %us)\r\n",
+                 filename, NORM_TOTAL_SAMPLES, NORM_SAMPLE_INTERVAL_MS / 1000);
+}
+
+void optode_normalize_service(void)
+{
+    if (!norm_active)
+        return;
+
+    if ((HAL_GetTick() - norm_next_tick) < 0x80000000UL) {
+        norm_count++;
+        norm_next_tick += NORM_SAMPLE_INTERVAL_MS;
+
+        optode_data_t data = {0};
+        bool ok = optode_sample(&data);
+
+        if (ok) {
+            shell_printf("[norm %u/%u] O2=%.3f T=%.3f CalPh=%.3f TcPh=%.3f\r\n",
+                         norm_count, NORM_TOTAL_SAMPLES,
+                         data.o2_concentration, data.temperature,
+                         data.cal_phase, data.tc_phase);
+
+            char line[200];
+            int len = snprintf(line, sizeof(line),
+                "%u,%f,%f,%f,%f,%f,%f,%f,%f,%f\r\n",
+                norm_count,
+                data.o2_concentration, data.temperature,
+                data.cal_phase, data.tc_phase,
+                data.c1_rph, data.c2_rph,
+                data.c1_amp, data.c2_amp,
+                data.raw_temp);
+            filesystem_log_write((const uint8_t *)line, (uint16_t)len);
+            filesystem_log_sync();
+        } else {
+            shell_printf("[norm %u/%u] Optode sample FAILED\r\n",
+                         norm_count, NORM_TOTAL_SAMPLES);
+        }
+
+        if (norm_count >= NORM_TOTAL_SAMPLES) {
+            norm_active = false;
+            filesystem_log_close();
+            g_app.mode = SYS_MODE_IDLE;
+            shell_print("[norm] Normalization complete.\r\n");
+        }
+    }
 }

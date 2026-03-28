@@ -24,7 +24,8 @@ extern "C" {
 /* System operating mode */
 typedef enum {
     SYS_MODE_IDLE,
-    SYS_MODE_RECORDING
+    SYS_MODE_RECORDING,
+    SYS_MODE_NORMALIZING
 } sys_mode_t;
 
 /* Peripheral status */

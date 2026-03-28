@@ -36,6 +36,11 @@ bool optode_sample(optode_data_t *out);
 void optode_listen(void);
 void optode_setup(void);
 
+/* Normalization — 30 samples at 20s intervals, logged to CSV on SD */
+void optode_normalize_init(void);
+void optode_normalize_start(void);
+void optode_normalize_service(void);
+
 /* Split-phase API for simultaneous sampling */
 void optode_wake(void);
 bool optode_fire(void);

@@ -48,6 +48,7 @@ void handle_clear(const void *arg);
 void handle_status(const void *arg);
 void handle_reset(const void *arg);
 void handle_version(const void *arg);
+void handle_normalize(const void *arg);
 
 /* RTC */
 void handle_rtc_settime(const void *arg);
