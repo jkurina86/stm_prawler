@@ -513,13 +513,14 @@ void optode_normalize_start(void)
         return;
     }
 
-    /* Build filename: optode_normalize_ddmmyyyy.csv */
+    /* Build filename: optode_norm_ddmmyyyy_hhmmss.csv */
     RTC_DateTime_t dt = {0};
     RTC_GetDateTime(&dt);
 
     char filename[40];
-    snprintf(filename, sizeof(filename), "optode_normalize_%02u%02u%04u.csv",
-             dt.days, dt.months, 2000 + dt.years);
+    snprintf(filename, sizeof(filename), "optode_norm_%02u%02u%04u_%02u%02u%02u.csv",
+             dt.days, dt.months, 2000 + dt.years,
+             dt.hours, dt.minutes, dt.seconds);
 
     FS_Result_t res = filesystem_log_create(filename);
     if (res != FS_OK) {
@@ -553,6 +554,10 @@ void optode_normalize_service(void)
 
         optode_data_t data = {0};
         bool ok = optode_sample(&data);
+
+        /* First sample may fail due to deep-sleep wake — retry once */
+        if (!ok && norm_count == 1)
+            ok = optode_sample(&data);
 
         if (ok) {
             shell_printf("[norm %u/%u] O2=%.3f T=%.3f CalPh=%.3f TcPh=%.3f\r\n",
