@@ -21,10 +21,17 @@ extern "C" {
 #define SENSOR_CFG_CTD_OPTODE     2   /* CTD + Optode */
 #define SENSOR_CFG_ALL            3   /* CTD + Optode + WetLab */
 
+/* Number of measurements per recording session */
+#define MEASUREMENTS_CTD_ONLY     315
+#define MEASUREMENTS_CTD_OPTODE   205
+#define MEASUREMENTS_CFG_ALL      155
+
 /* System operating mode */
 typedef enum {
     SYS_MODE_IDLE,
     SYS_MODE_RECORDING,
+    SYS_MODE_FALSE_START,
+    SYS_MODE_TIMEOUT,
     SYS_MODE_NORMALIZING
 } sys_mode_t;
 

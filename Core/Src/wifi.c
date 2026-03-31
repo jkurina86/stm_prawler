@@ -210,19 +210,6 @@ static int wifi_parse_r0(const char *resp, char *msg_buf, uint16_t buf_size)
     return (int)data_len;
 }
 
-/**
- * @brief  Restart TCP server after a detected disconnect.
- */
-static void wifi_restart_tcp_server(void)
-{
-    shell_printf("[wifi] Client disconnected, restarting TCP server...\r\n");
-
-    char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("P5=0", resp, sizeof(resp), 5000);
-
-    wifi_setup_tcp_server();
-}
-
 /* Public functions ----------------------------------------------------------*/
 
 void wifi_init(UART_HandleTypeDef *huart)
@@ -334,7 +321,7 @@ bool wifi_send(const char *message)
     wifi_read_until_prompt(resp, sizeof(resp), 5000);
 
     if (strstr(resp, "ERROR")) {
-        wifi_restart_tcp_server();
+        shell_print("[wifi] Send failed\r\n");
         return false;
     }
     return true;
@@ -346,16 +333,12 @@ uint16_t wifi_poll(char *msg_buf, uint16_t buf_size)
         return 0;
 
     char resp[RESP_BUF_SIZE];
-    if (!wifi_send_cmd("R0", resp, sizeof(resp), 3000)) {
-        wifi_restart_tcp_server();
+    if (!wifi_send_cmd("R0", resp, sizeof(resp), 3000))
         return 0;
-    }
 
     int result = wifi_parse_r0(resp, msg_buf, buf_size);
-    if (result < 0) {
-        wifi_restart_tcp_server();
+    if (result < 0)
         return 0;
-    }
     return (uint16_t)result;
 }
 
@@ -398,20 +381,13 @@ void wifi_service(void)
     heartbeat_tick = HAL_GetTick();
 
     char resp[RESP_BUF_SIZE];
-    if (!wifi_send_cmd("R0", resp, sizeof(resp), 5000)) {
-        /* R0 returned ERROR — connection is dead */
-        wifi_restart_tcp_server();
+    if (!wifi_send_cmd("R0", resp, sizeof(resp), 5000))
         return;
-    }
 
     char msg[256];
     int result = wifi_parse_r0(resp, msg, sizeof(msg));
-    if (result < 0) {
-        /* -1 means peer disconnected */
-        wifi_restart_tcp_server();
+    if (result < 0)
         return;
-    }
-    if (result > 0) {
+    if (result > 0)
         shell_printf("[wifi] Received: %s\r\n", msg);
-    }
 }

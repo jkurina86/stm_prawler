@@ -181,7 +181,6 @@ int main(void)
   g_app.wetlab_status = PERIPH_READY;
 
   recorder_init();
-  optode_normalize_init();
   wifi_init(&huart4);
   shell_init();
 
@@ -198,7 +197,6 @@ int main(void)
     shell_task();
     tasker_run();
     recorder_service();
-    optode_normalize_service();
     wifi_service();
 
   }

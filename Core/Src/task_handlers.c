@@ -378,14 +378,6 @@ void handle_sensors(const void *arg)
     }
 }
 
-/* Normalization Handlers -------------------------------------------------*/
-
-void handle_normalize(const void *arg)
-{
-    (void)arg;
-    optode_normalize_start();
-}
-
 /* Config Handlers --------------------------------------------------------*/
 
 void handle_config(const void *arg)

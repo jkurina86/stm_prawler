@@ -24,11 +24,14 @@
 #define SAMPLE_INTERVAL       4000  /* ms between samples */
 #define TOLERANCE             0.5f  /* Depth tolerance (dbar) */
 #define FALSE_START_SAMPLES   15    /* Validation window: 15 × 4s = 60s */
+#define NORM_INTERVAL         20000 /* ms between normalization samples */
+#define NORM_SAMPLES          30    /* ~10 min normalization */
 
 /* Private types -------------------------------------------------------------*/
 typedef enum {
     REC_IDLE,
-    REC_RECORDING
+    REC_RECORDING,
+    REC_NORMALIZING
 } rec_state_t;
 
 /* Private variables ---------------------------------------------------------*/
@@ -48,6 +51,7 @@ static uint16_t file_counter;
 static char rec_filename[16];
 
 static sensor_reading_t reading;
+static uint16_t norm_count;
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -153,6 +157,25 @@ static void sample_and_record(void)
     record_num++;
 }
 
+static uint16_t get_max_samples(void)
+{
+    switch (g_app.sensor_level) {
+    case SENSOR_CFG_CTD_ONLY:   return MEASUREMENTS_CTD_ONLY;
+    case SENSOR_CFG_CTD_OPTODE: return MEASUREMENTS_CTD_OPTODE;
+    default:                    return MEASUREMENTS_CFG_ALL;
+    }
+}
+
+static void enter_normalization(void)
+{
+    norm_count = 0;
+    next_sample_tick = HAL_GetTick() + NORM_INTERVAL;
+    state = REC_NORMALIZING;
+    g_app.mode = SYS_MODE_NORMALIZING;
+    shell_printf("[recorder] Normalization started (%u samples)\r\n",
+                 NORM_SAMPLES);
+}
+
 /* Public functions ----------------------------------------------------------*/
 
 void recorder_init(void)
@@ -197,21 +220,13 @@ void recorder_service(void)
         break;
 
     case REC_RECORDING:
-        /* Check if PB8 went LOW — stop recording */
+        /* Check if PB8 went LOW — stop recording, enter normalization */
         if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) == GPIO_PIN_RESET) {
-            /* Flush remaining data */
             flush_buffer(rec_buf[active_buf], buf_offset);
-            filesystem_log_close();
+            buf_offset = 0;
 
-            shell_printf("[recorder] Stopped. %lu records saved to %s\r\n",
-                         record_num, rec_filename);
-
-            __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
-            g_app.start_flag = false;
-            state = REC_IDLE;
-            g_app.mode = SYS_MODE_IDLE;
-            first_sample = true;
-            start_time = 0;
+            shell_printf("[recorder] PB8 LOW after %lu records\r\n", record_num);
+            enter_normalization();
             return;
         }
 
@@ -233,8 +248,6 @@ void recorder_service(void)
                     filesystem_log_delete(rec_filename);
                     shell_printf("[recorder] False start — file %s removed\r\n",
                                  rec_filename);
-                    /* Clear any pending EXTI/g_app.start_flag so we don't
-                       immediately re-trigger while PB8 is still HIGH */
                     __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
                     g_app.start_flag = false;
                     state = REC_IDLE;
@@ -244,8 +257,46 @@ void recorder_service(void)
                     return;
                 }
             }
+
+            /* Recording timeout — max samples reached */
+            if (sample_count >= get_max_samples()) {
+                flush_buffer(rec_buf[active_buf], buf_offset);
+                buf_offset = 0;
+
+                shell_printf("[recorder] Timeout at %u samples\r\n",
+                             sample_count);
+                enter_normalization();
+                return;
+            }
         }
 
+        break;
+
+    case REC_NORMALIZING:
+        /* Ignore PB8 triggers during normalization */
+        if (g_app.start_flag)
+            g_app.start_flag = false;
+
+        if ((HAL_GetTick() - next_sample_tick) < 0x80000000UL) {
+            sample_and_record();
+            norm_count++;
+            next_sample_tick += NORM_INTERVAL;
+
+            if (norm_count >= NORM_SAMPLES) {
+                flush_buffer(rec_buf[active_buf], buf_offset);
+                filesystem_log_close();
+
+                shell_printf("[recorder] Complete. %lu records in %s\r\n",
+                             record_num, rec_filename);
+
+                __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
+                g_app.start_flag = false;
+                state = REC_IDLE;
+                g_app.mode = SYS_MODE_IDLE;
+                first_sample = true;
+                start_time = 0;
+            }
+        }
         break;
     }
 }
