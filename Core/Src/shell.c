@@ -52,6 +52,7 @@ const shell_command_t shell_commands[] = {
     {"help", "Display available commands", cmd_help},
     {"clear", "Clear terminal screen", cmd_clear},
     {"status", "Show system status", cmd_status},
+    {"pb8", "Show PB8 pin state", cmd_pb8},
     {"reset", "Reset the system", cmd_reset},
     {"version", "Show firmware version", cmd_version},
 
@@ -311,10 +312,13 @@ void cmd_status(int argc, char **argv)
     tasker_enqueue(handle_status, NULL, 0);
 }
 
-/**
-  * @brief Reset system command
-  * @note Schedules a reset task with a 3-second delay
-  */
+void cmd_pb8(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    GPIO_PinState pin = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8);
+    shell_printf("PB8 = %s\r\n", pin == GPIO_PIN_SET ? "HIGH" : "LOW");
+}
+
 void cmd_reset(int argc, char **argv)
 {
     (void)argc; (void)argv; /* Unused args */
