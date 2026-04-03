@@ -1,14 +1,17 @@
 /**
   ******************************************************************************
   * @file    wifi.c
-  * @brief   ISM4343-WBM-L54 WiFi module driver (AP mode, TCP server)
+  * @brief   ISM4343-WBM-L54 WiFi module driver (AP mode, TCP passthrough)
   * @note    UART4 at 115200 baud, interrupt-driven RX with ring buffer.
-  *          AT command protocol: commands terminated with \r, responses
-  *          terminated with "> " prompt.
   *
-  *          Connection health is determined by R0 polling — there is no
-  *          explicit "socket connected" query on the ISM4343. R0 returns
-  *          -1 when the peer has disconnected.
+  *          Boot sequence uses AT commands to configure AP and TCP server,
+  *          then issues PX=0,0 to enter streaming mode.  After that, all
+  *          UART data flows directly to/from the connected TCP client --
+  *          no AT command framing.
+  *
+  *          wifi_service() implements a WiFi shell: assembles incoming
+  *          bytes into command lines and dispatches them via the shared
+  *          shell command table (shell_dispatch).
   ******************************************************************************
   */
 
@@ -17,11 +20,12 @@
 #include "shell.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 /* Private defines -----------------------------------------------------------*/
 #define RX_RING_SIZE    512
 #define RESP_BUF_SIZE   512
-#define HEARTBEAT_INTERVAL_MS  30000   /* 30s between connection health checks */
+#define WIFI_CMD_BUF_SIZE  SHELL_MAX_CMD_LEN
 
 /* Private types -------------------------------------------------------------*/
 typedef struct {
@@ -35,8 +39,11 @@ static UART_HandleTypeDef *wifi_huart;
 static ring_buffer_t rx_ring;
 static uint8_t rx_byte;        /* single-byte target for HAL_UART_Receive_IT */
 static wifi_state_t state = WIFI_STATE_OFF;
-static char send_buf[256];      /* shared buffer for wifi-send shell command */
-static uint32_t heartbeat_tick;
+
+/* WiFi shell command buffer */
+static char wifi_cmd_buf[WIFI_CMD_BUF_SIZE];
+static uint16_t wifi_cmd_pos;
+static uint8_t wifi_last_eol;   /* last CR/LF byte seen, to collapse \r\n pairs */
 
 /* Ring buffer helpers -------------------------------------------------------*/
 
@@ -90,11 +97,6 @@ static void wifi_send_str(const char *str)
                       HAL_MAX_DELAY);
 }
 
-static void wifi_send_bytes(const uint8_t *data, uint16_t len)
-{
-    HAL_UART_Transmit(wifi_huart, data, len, HAL_MAX_DELAY);
-}
-
 /**
  * @brief  Read from ring buffer until "> " prompt or timeout.
  * @return Number of bytes stored in resp_buf (null-terminated).
@@ -127,8 +129,8 @@ static uint16_t wifi_read_until_prompt(char *resp_buf, uint16_t buf_size,
 /**
  * @brief  Send an AT command and read the response until "> " prompt.
  */
-bool wifi_send_cmd(const char *cmd, char *resp_buf, uint16_t buf_size,
-                   uint32_t timeout_ms)
+static bool wifi_send_cmd(const char *cmd, char *resp_buf, uint16_t buf_size,
+                          uint32_t timeout_ms)
 {
     rb_flush();
     wifi_send_str(cmd);
@@ -170,84 +172,9 @@ static void wifi_soft_reset(void)
     wifi_send_cmd("", resp, sizeof(resp), 2000);
 }
 
-/* Private helpers -----------------------------------------------------------*/
+/* Setup functions -----------------------------------------------------------*/
 
-/**
- * @brief  Parse an R0 response and check connection health.
- * @param  resp      Full R0 response string.
- * @param  msg_buf   Buffer to store received data (may be NULL if not needed).
- * @param  buf_size  Size of msg_buf.
- * @return >0: bytes of data received, 0: no data (connection alive), -1: peer disconnected.
- */
-static int wifi_parse_r0(const char *resp, char *msg_buf, uint16_t buf_size)
-{
-    char *data_start = strstr(resp, "\r\n");
-    if (!data_start)
-        return -1;
-    data_start += 2;
-
-    char *data_end = strstr(data_start, "\r\nOK\r\n");
-    if (!data_end)
-        return -1;
-
-    uint16_t data_len = (uint16_t)(data_end - data_start);
-
-    /* "-1" means peer disconnected */
-    if (data_len == 2 && data_start[0] == '-' && data_start[1] == '1')
-        return -1;
-
-    /* Empty = no data but connection alive */
-    if (data_len == 0)
-        return 0;
-
-    /* Copy received data if caller wants it */
-    if (msg_buf && buf_size > 0) {
-        if (data_len > buf_size - 1)
-            data_len = buf_size - 1;
-        memcpy(msg_buf, data_start, data_len);
-        msg_buf[data_len] = '\0';
-    }
-    return (int)data_len;
-}
-
-/* Public functions ----------------------------------------------------------*/
-
-void wifi_init(UART_HandleTypeDef *huart)
-{
-    wifi_huart = huart;
-    rb_init();
-    state = WIFI_STATE_INIT;
-    g_app.wifi_state = (uint8_t)state;
-
-    /* Start single-byte interrupt reception */
-    HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
-
-    shell_printf("[wifi] Initializing ISM4343 module...\r\n");
-
-    if (!wifi_setup_ap()) {
-        state = WIFI_STATE_ERROR;
-        g_app.wifi_state = (uint8_t)state;
-        return;
-    }
-
-    if (!wifi_setup_tcp_server()) {
-        state = WIFI_STATE_ERROR;
-        g_app.wifi_state = (uint8_t)state;
-        return;
-    }
-}
-
-wifi_state_t wifi_get_state(void)
-{
-    return state;
-}
-
-char *wifi_get_send_buf(void)
-{
-    return send_buf;
-}
-
-bool wifi_setup_ap(void)
+static bool wifi_setup_ap(void)
 {
     shell_printf("[wifi] Resetting module...\r\n");
     wifi_soft_reset();
@@ -275,119 +202,162 @@ bool wifi_setup_ap(void)
     return true;
 }
 
-bool wifi_setup_tcp_server(void)
+static bool wifi_setup_tcp_server(void)
 {
-    shell_printf("[wifi] Setting up TCP server on port %s...\r\n",
+    shell_printf("[wifi] Configuring TCP passthrough on port %s...\r\n",
                  WIFI_TCP_PORT);
-    if (!wifi_expect_ok("P0=0",                  "Set Socket 0",         5000))
+
+    if (!wifi_expect_ok("P2=" WIFI_TCP_PORT, "Set Local Port", 5000))
         return false;
-    if (!wifi_expect_ok("P1=0",                  "Set Protocol TCP",     5000))
+    if (!wifi_expect_ok("S1=1460", "Set Write Packet Size", 5000))
         return false;
-    if (!wifi_expect_ok("P2=" WIFI_TCP_PORT,     "Set Local Port",       5000))
-        return false;
-    if (!wifi_expect_ok("R1=1460",               "Set Read Packet Size", 5000))
-        return false;
-    if (!wifi_expect_ok("R2=1000",               "Set Read Timeout",     5000))
+    if (!wifi_expect_ok("S2=50", "Set Write Timeout", 5000))
         return false;
 
-    /* P5=1 starts listening. We don't wait for "Accepted" — instead
-       we go straight to READY and let R0 heartbeats detect whether
-       a client is actually connected. */
-    rb_flush();
-    wifi_send_str("P5=1\r");
-
-    shell_printf("[wifi] TCP server listening on port %s\r\n", WIFI_TCP_PORT);
-    state = WIFI_STATE_READY;
-    g_app.wifi_state = (uint8_t)state;
-    heartbeat_tick = HAL_GetTick();
-    return true;
-}
-
-bool wifi_send(const char *message)
-{
-    if (state != WIFI_STATE_READY)
-        return false;
-
-    uint16_t len = strlen(message);
-    char cmd[32];
-    snprintf(cmd, sizeof(cmd), "S3=%u\r", len);
-
-    rb_flush();
-    wifi_send_str(cmd);
-    HAL_Delay(50);      /* required gap before payload (per ISM4343 protocol) */
-    wifi_send_bytes((const uint8_t *)message, len);
-
+    /* Enter streaming mode -- this is the last AT command.
+       After the module responds, all UART data flows to/from TCP peer. */
     char resp[RESP_BUF_SIZE];
-    wifi_read_until_prompt(resp, sizeof(resp), 5000);
-
+    wifi_send_cmd("PX=0,0", resp, sizeof(resp), 10000);
     if (strstr(resp, "ERROR")) {
-        shell_print("[wifi] Send failed\r\n");
+        shell_printf("[wifi] PX failed: %s\r\n", resp);
         return false;
     }
+
+    /* Flush any residual AT response bytes from the ring buffer */
+    rb_flush();
+
+    shell_printf("[wifi] TCP passthrough active on port %s\r\n", WIFI_TCP_PORT);
+    state = WIFI_STATE_STREAMING;
+    g_app.wifi_state = (uint8_t)state;
     return true;
 }
 
-uint16_t wifi_poll(char *msg_buf, uint16_t buf_size)
+/* Public functions ----------------------------------------------------------*/
+
+void wifi_init(UART_HandleTypeDef *huart)
 {
-    if (state != WIFI_STATE_READY)
-        return 0;
+    wifi_huart = huart;
+    rb_init();
+    wifi_cmd_pos = 0;
+    state = WIFI_STATE_INIT;
+    g_app.wifi_state = (uint8_t)state;
 
-    char resp[RESP_BUF_SIZE];
-    if (!wifi_send_cmd("R0", resp, sizeof(resp), 3000))
-        return 0;
+    /* Start single-byte interrupt reception */
+    HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
 
-    int result = wifi_parse_r0(resp, msg_buf, buf_size);
-    if (result < 0)
-        return 0;
-    return (uint16_t)result;
-}
+    shell_printf("[wifi] Initializing ISM4343 module...\r\n");
 
-/* Debug ---------------------------------------------------------------------*/
-
-void wifi_dump_ring(void)
-{
-    shell_printf("[wifi] Ring: head=%u tail=%u\r\n", rx_ring.head, rx_ring.tail);
-    uint8_t byte;
-    uint16_t count = 0;
-    while (rb_pop(&byte)) {
-        if (byte >= 0x20 && byte < 0x7F)
-            shell_printf("%c", byte);
-        else
-            shell_printf("\\x%02X", byte);
-        count++;
+    if (!wifi_setup_ap()) {
+        state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
+        return;
     }
-    if (count > 0)
-        shell_printf("\r\n");
-    else
-        shell_printf("[wifi] Ring buffer empty\r\n");
+
+    if (!wifi_setup_tcp_server()) {
+        state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
+        return;
+    }
 }
 
-/* Main-loop service ---------------------------------------------------------*/
+wifi_state_t wifi_get_state(void)
+{
+    return state;
+}
+
+/* Passthrough data API ------------------------------------------------------*/
+
+uint16_t wifi_write(const uint8_t *data, uint16_t len)
+{
+    if (state != WIFI_STATE_STREAMING)
+        return 0;
+    HAL_StatusTypeDef status = HAL_UART_Transmit(wifi_huart, data, len,
+                                                  HAL_MAX_DELAY);
+    return (status == HAL_OK) ? len : 0;
+}
+
+void wifi_printf(const char *format, ...)
+{
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    if (len > 0)
+        wifi_write((const uint8_t *)buffer, (uint16_t)len);
+}
+
+uint16_t wifi_read(uint8_t *buf, uint16_t buf_size)
+{
+    uint16_t count = 0;
+    uint8_t byte;
+    while (count < buf_size && rb_pop(&byte))
+        buf[count++] = byte;
+    return count;
+}
+
+uint16_t wifi_available(void)
+{
+    uint16_t h = rx_ring.head;
+    uint16_t t = rx_ring.tail;
+    return (h >= t) ? (h - t) : (RX_RING_SIZE - t + h);
+}
+
+/* Main-loop service -- WiFi shell -------------------------------------------*/
 
 /**
- * @brief  Non-blocking service function, call from main loop.
+ * @brief  Non-blocking WiFi shell, call from main loop.
  *
- *  READY: sends R0 heartbeat every 30s. If R0 returns -1 or ERROR
- *         the TCP session is dead — closes socket and restarts server.
- *         If R0 returns data, prints it so it isn't silently lost.
+ *  Drains the RX ring buffer, assembles command lines, and dispatches
+ *  them via the shared shell command table.  Sends "> " prompt back
+ *  over WiFi after each command (or empty line).
  */
 void wifi_service(void)
 {
-    if (state != WIFI_STATE_READY)
+    if (state != WIFI_STATE_STREAMING)
         return;
 
-    if ((HAL_GetTick() - heartbeat_tick) < HEARTBEAT_INTERVAL_MS)
-        return;
-    heartbeat_tick = HAL_GetTick();
+    uint8_t byte;
+    while (rb_pop(&byte)) {
+        switch (byte) {
+        case SHELL_CHAR_CR:
+        case SHELL_CHAR_LF:
+            /* Collapse \r\n or \n\r into a single line ending */
+            if (wifi_last_eol != 0 && byte != wifi_last_eol) {
+                wifi_last_eol = 0;
+                break;  /* skip the second byte of a \r\n pair */
+            }
+            wifi_last_eol = byte;
+            wifi_cmd_buf[wifi_cmd_pos] = '\0';
+            if (wifi_cmd_pos > 0) {
+                shell_dispatch(wifi_cmd_buf);
+                wifi_cmd_pos = 0;
+                memset(wifi_cmd_buf, 0, sizeof(wifi_cmd_buf));
+            }
+            wifi_printf("> ");
+            break;
 
-    char resp[RESP_BUF_SIZE];
-    if (!wifi_send_cmd("R0", resp, sizeof(resp), 5000))
-        return;
+        case SHELL_CHAR_BS:
+        case SHELL_CHAR_DEL:
+            wifi_last_eol = 0;
+            if (wifi_cmd_pos > 0) {
+                wifi_cmd_pos--;
+                wifi_cmd_buf[wifi_cmd_pos] = '\0';
+            }
+            break;
 
-    char msg[256];
-    int result = wifi_parse_r0(resp, msg, sizeof(msg));
-    if (result < 0)
-        return;
-    if (result > 0)
-        shell_printf("[wifi] Received: %s\r\n", msg);
+        case SHELL_CHAR_TAB:
+        case SHELL_CHAR_ESC:
+            wifi_last_eol = 0;
+            break;
+
+        default:
+            wifi_last_eol = 0;
+            if (byte >= 32 && byte <= 126 &&
+                wifi_cmd_pos < (WIFI_CMD_BUF_SIZE - 1)) {
+                wifi_cmd_buf[wifi_cmd_pos++] = (char)byte;
+            }
+            break;
+        }
+    }
 }

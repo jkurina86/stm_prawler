@@ -13,7 +13,6 @@
 #include "task_handlers.h"
 #include "config.h"
 #include "filesystem.h"
-#include "wifi.h"
 #include <stdarg.h>
 
 extern UART_HandleTypeDef huart1;
@@ -96,10 +95,6 @@ const shell_command_t shell_commands[] = {
 
     /* WiFi Commands */
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
-    {"wifi-send", "Send message over WiFi", cmd_wifi_send},
-    {"wifi-poll", "Poll for incoming WiFi message", cmd_wifi_poll},
-    {"wifi-reset", "Reset WiFi module and reinitialize", cmd_wifi_reset},
-    {"wifi-dump", "Dump raw WiFi ring buffer contents", cmd_wifi_dump},
 
     {NULL, NULL, NULL} /* End marker */
 };
@@ -107,6 +102,16 @@ const shell_command_t shell_commands[] = {
 /* Private function prototypes -----------------------------------------------*/
 static void shell_execute_command(char *cmd_line);
 static int shell_parse_command(char *cmd_line, char **argv);
+
+/**
+ * @brief  Public command dispatch -- parses and executes a command string.
+ * @note   Used by the WiFi shell to reuse the UART shell's command table.
+ *         The caller's buffer is modified by strtok (same as UART shell).
+ */
+void shell_dispatch(char *cmd_line)
+{
+    shell_execute_command(cmd_line);
+}
 
 /* Public functions ----------------------------------------------------------*/
 
@@ -692,48 +697,6 @@ void cmd_wifi_status(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_wifi_status, NULL, 0);
-}
-
-void cmd_wifi_send(int argc, char **argv)
-{
-    if (argc < 2)
-        return;
-
-    char *buf = wifi_get_send_buf();
-    buf[0] = '\0';
-
-    /* Concatenate all args into the send buffer */
-    uint16_t pos = 0;
-    for (int i = 1; i < argc && pos < 255; i++) {
-        if (i > 1 && pos < 255)
-            buf[pos++] = ' ';
-        uint16_t len = strlen(argv[i]);
-        if (pos + len > 255)
-            len = 255 - pos;
-        memcpy(&buf[pos], argv[i], len);
-        pos += len;
-    }
-    buf[pos] = '\0';
-
-    tasker_enqueue(handle_wifi_send, NULL, 0);
-}
-
-void cmd_wifi_poll(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_poll, NULL, 0);
-}
-
-void cmd_wifi_reset(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_reset, NULL, 0);
-}
-
-void cmd_wifi_dump(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_dump, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/

@@ -63,7 +63,7 @@ void handle_status(const void *arg)
     (void)arg;
     static const char *mode_names[]   = {"IDLE", "RECORDING", "NORMALIZING"};
     static const char *periph_names[] = {"OFF", "READY", "ERROR"};
-    static const char *wifi_names[]   = {"OFF", "INIT", "READY", "ERROR"};
+    static const char *wifi_names[]   = {"OFF", "INIT", "STREAMING", "ERROR"};
 
     shell_printf("Mode:       %s\r\n", mode_names[g_app.mode]);
     shell_printf("Uptime:     %lu ms\r\n", HAL_GetTick());
@@ -634,51 +634,9 @@ void handle_wifi_status(const void *arg)
 {
     (void)arg;
     static const char *state_names[] = {
-        "OFF", "INIT", "READY", "ERROR"
+        "OFF", "INIT", "STREAMING", "ERROR"
     };
     wifi_state_t st = wifi_get_state();
-    shell_printf("WiFi state: %s\r\n", state_names[st]);
-}
-
-void handle_wifi_send(const void *arg)
-{
-    (void)arg;
-    char *msg = wifi_get_send_buf();
-    if (wifi_get_state() != WIFI_STATE_READY) {
-        shell_print("WiFi not connected\r\n");
-        return;
-    }
-    if (wifi_send(msg))
-        shell_printf("[wifi] Sent: %s\r\n", msg);
-    else
-        shell_print("[wifi] Send failed\r\n");
-}
-
-void handle_wifi_poll(const void *arg)
-{
-    (void)arg;
-    if (wifi_get_state() != WIFI_STATE_READY) {
-        shell_print("WiFi not connected\r\n");
-        return;
-    }
-    char buf[256];
-    uint16_t len = wifi_poll(buf, sizeof(buf));
-    if (len > 0)
-        shell_printf("[wifi] Received: %s\r\n", buf);
-    else
-        shell_print("[wifi] No data\r\n");
-}
-
-void handle_wifi_reset(const void *arg)
-{
-    (void)arg;
-    shell_print("[wifi] Reinitializing...\r\n");
-    extern UART_HandleTypeDef huart4;
-    wifi_init(&huart4);
-}
-
-void handle_wifi_dump(const void *arg)
-{
-    (void)arg;
-    wifi_dump_ring();
+    shell_printf("WiFi state: %s (rx buf: %u bytes)\r\n",
+                 state_names[st], wifi_available());
 }

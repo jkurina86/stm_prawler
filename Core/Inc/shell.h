@@ -47,6 +47,7 @@ void shell_process_char(uint8_t ch);
 void shell_print(const char *str);
 void shell_printf(const char *format, ...);
 void shell_task(void);
+void shell_dispatch(char *cmd_line);
 void shell_uart_receive_callback(void);
 
 /* Command functions */
@@ -84,10 +85,6 @@ void cmd_config(int argc, char **argv);
 
 /* WiFi */
 void cmd_wifi_status(int argc, char **argv);
-void cmd_wifi_send(int argc, char **argv);
-void cmd_wifi_poll(int argc, char **argv);
-void cmd_wifi_reset(int argc, char **argv);
-void cmd_wifi_dump(int argc, char **argv);
 
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);

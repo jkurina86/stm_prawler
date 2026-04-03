@@ -2,9 +2,9 @@
 prawler-wifi.py - Connect to STM-PRAWLER board over WiFi via ISM4343 module.
 
 This PC has an ISM4343-WBM-L54 module on COM10. The prawler board runs as
-AP (SSID: ISM4343_LINK) with a TCP server on port 5000. This script configures
-the local module as a station, connects to the AP, establishes a TCP link,
-then provides an interactive send/receive console.
+AP (SSID: prawler) with a TCP server on port 5000 in passthrough mode (PX).
+This script configures the local module as a station, connects to the AP,
+enters passthrough mode, then provides an interactive shell console.
 
 Usage: py -3 prawler-wifi.py [--port COM10]
 """
@@ -13,7 +13,6 @@ import serial
 import threading
 import time
 import sys
-import re
 import argparse
 
 # --- Configuration (must match wifi.h on the prawler board) ---
@@ -26,8 +25,6 @@ AP_SECURITY = 0         # 0 = Open
 AP_IP = "192.168.10.1"
 TCP_PORT = 5000
 # --------------------------------------------------------------
-
-lock = threading.Lock()
 
 
 def _read_until_prompt(ser, timeout):
@@ -60,21 +57,23 @@ def expect_ok(ser, cmd, label="", timeout=5.0):
     return resp
 
 
-def wait_for(ser, keyword, timeout=30.0):
-    """Read until keyword appears or timeout."""
-    buf = b""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        chunk = ser.read(ser.in_waiting or 1)
-        if chunk:
-            buf += chunk
-            text = buf.decode("ascii", errors="replace")
-            if keyword in text:
-                return text
-        else:
-            time.sleep(0.05)
-    text = buf.decode("ascii", errors="replace")
-    raise TimeoutError(f"Timed out waiting for '{keyword}'. Got: {text}")
+def check_passthrough(ser):
+    """Check if the module is already in passthrough mode.
+
+    Sends a bare \\n -- in AT command mode this does nothing (AT commands
+    need \\r), but in passthrough the prawler WiFi shell responds with '> '.
+    """
+    saved_timeout = ser.timeout
+    ser.timeout = 1
+    ser.reset_input_buffer()
+    ser.write(b"\n")
+    # Block-read up to 16 bytes with the 1s timeout
+    data = ser.read(16)
+    ser.timeout = saved_timeout
+    if b"> " in data:
+        print("[local] Module already in passthrough mode -- skipping setup.")
+        return True
+    return False
 
 
 def hard_reset(ser):
@@ -105,64 +104,45 @@ def setup_station(ser):
 
 
 def setup_tcp_client(ser):
-    """Connect to the prawler board's TCP server."""
+    """Connect to the prawler board's TCP server and enter passthrough."""
     print(f"[local] Connecting to {AP_IP}:{TCP_PORT}...")
     expect_ok(ser, "P0=0", "Set Socket 0")
     expect_ok(ser, "P1=0", "Set Protocol TCP")
     expect_ok(ser, f"P3={AP_IP}", "Set Remote Host IP")
     expect_ok(ser, f"P4={TCP_PORT}", "Set Remote Port")
-    expect_ok(ser, "R1=1460", "Set Read Packet Size")
-    expect_ok(ser, "R2=1000", "Set Read Timeout")
+    expect_ok(ser, "S1=1460", "Set Write Packet Size")
+    expect_ok(ser, "S2=50", "Set Write Timeout")
 
     resp = send_cmd(ser, "P6=1", timeout=15)
     if "ERROR" in resp:
         raise RuntimeError(f"TCP connect failed: {resp}")
     print("[local] TCP connected to prawler board.")
 
+    # Enter client passthrough mode -- after this, serial port IS the TCP link
+    print("[local] Entering passthrough mode...")
+    resp = send_cmd(ser, "PX=1,0", timeout=10)
+    if "ERROR" in resp:
+        raise RuntimeError(f"PX failed: {resp}")
 
-def _extract_data(raw):
-    """Extract message payload from R0 response."""
-    m = re.search(r"\r\n(.*?)\r\nOK\r\n", raw, re.DOTALL)
-    if not m:
-        return None
-    data = m.group(1).strip()
-    if not data or data == "-1":
-        return None
-    return data
+    # Flush any residual AT response bytes
+    time.sleep(0.1)
+    ser.reset_input_buffer()
 
-
-def send_message(ser, message):
-    """Send a message to the prawler board via S3."""
-    data = message.encode("ascii")
-    length = len(data)
-    with lock:
-        ser.reset_input_buffer()
-        ser.write(f"S3={length}\r".encode())
-        time.sleep(0.05)
-        ser.write(data)
-        _read_until_prompt(ser, timeout=5.0)
-
-
-def read_message(ser):
-    """Poll for an incoming message via R0. Returns data or None."""
-    with lock:
-        ser.reset_input_buffer()
-        ser.write(b"R0\r")
-        raw = _read_until_prompt(ser, timeout=3.0)
-    return _extract_data(raw)
+    print("[local] Passthrough active.")
 
 
 def receiver_thread(ser, stop_event):
-    """Background thread that polls for incoming messages from the prawler."""
+    """Background thread that reads raw bytes from the passthrough link."""
     while not stop_event.is_set():
         try:
-            msg = read_message(ser)
-            if msg:
-                print(f"\n  [prawler -> local]: {msg}")
-                print(">> ", end="", flush=True)
+            data = ser.read(ser.in_waiting or 1)
+            if data:
+                text = data.decode("ascii", errors="replace")
+                sys.stdout.write(text)
+                sys.stdout.flush()
         except Exception:
-            pass
-        stop_event.wait(0.5)
+            if not stop_event.is_set():
+                time.sleep(0.1)
 
 
 def main():
@@ -176,7 +156,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  STM-PRAWLER WiFi Client")
+    print("  STM-PRAWLER WiFi Shell")
     print(f"  Local module: {args.port}")
     print(f"  Target AP:    {AP_SSID} ({AP_IP}:{TCP_PORT})")
     print("=" * 60)
@@ -192,20 +172,12 @@ def main():
     stop_event = threading.Event()
 
     try:
-        setup_station(ser)
-        time.sleep(1)
-        setup_tcp_client(ser)
+        if not check_passthrough(ser):
+            setup_station(ser)
+            time.sleep(1)
+            setup_tcp_client(ser)
 
-        print()
-        print("=" * 60)
-        print("  Connected to prawler board!")
-        print()
-        print("  Type a message and press Enter to send.")
-        print("  Incoming messages are displayed automatically.")
-        print("  Type 'quit' to exit.")
-        print("=" * 60)
-        print()
-
+        # Start receiver thread for incoming data
         rx = threading.Thread(
             target=receiver_thread,
             args=(ser, stop_event),
@@ -213,19 +185,28 @@ def main():
         )
         rx.start()
 
+        # Send \n to solicit initial prompt from prawler
+        ser.write(b"\n")
+
+        print()
+        print("=" * 60)
+        print("  Connected to prawler WiFi shell!")
+        print()
+        print("  Type a command and press Enter.")
+        print("  Type 'quit' to exit.")
+        print("=" * 60)
+        print()
+
         while True:
             try:
-                user_input = input(">> ").strip()
+                user_input = input("")
             except (EOFError, KeyboardInterrupt):
                 break
 
-            if not user_input:
-                continue
-            if user_input.lower() == "quit":
+            if user_input.strip().lower() == "quit":
                 break
 
-            send_message(ser, user_input)
-            print(f"  [local -> prawler]: {user_input}")
+            ser.write((user_input + "\r").encode())
 
     except Exception as e:
         print(f"\nError: {e}")

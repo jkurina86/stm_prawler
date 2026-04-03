@@ -76,10 +76,6 @@ void handle_config(const void *arg);
 
 /* WiFi */
 void handle_wifi_status(const void *arg);
-void handle_wifi_send(const void *arg);
-void handle_wifi_poll(const void *arg);
-void handle_wifi_reset(const void *arg);
-void handle_wifi_dump(const void *arg);
 
 /* File System */
 void handle_fs_mount(const void *arg);
