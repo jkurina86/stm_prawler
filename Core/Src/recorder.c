@@ -50,6 +50,7 @@ static uint16_t sample_count;
 static uint32_t record_num;
 static uint32_t next_sample_tick;
 static char rec_filename[32];
+static char last_successful_filename[32];
 
 static sensor_reading_t reading;
 static uint16_t norm_count;
@@ -201,6 +202,14 @@ void recorder_init(void)
     active_buf = 0;
     buf_offset = 0;
     record_num = 0;
+
+    /* Seed last filename from SD card if a recording exists */
+    if (filesystem_find_latest("_record.csv",
+            last_successful_filename,
+            sizeof(last_successful_filename)) == FS_OK) {
+        shell_printf("[recorder] Found previous recording: %s\r\n",
+                     last_successful_filename);
+    }
 }
 
 void recorder_service(void)
@@ -270,20 +279,24 @@ void recorder_service(void)
                 if (reading.ctd.pressure > max_pressure)
                     max_pressure = reading.ctd.pressure;
 
-                if (sample_count == FALSE_START_SAMPLES &&
-                    max_pressure <= initial_depth + TOLERANCE) {
-                    /* No significant descent — discard recording */
-                    filesystem_log_close();
-                    filesystem_log_delete(rec_filename);
-                    shell_printf("[recorder] False start — file %s removed\r\n",
-                                 rec_filename);
-                    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
-                    g_app.start_flag = false;
-                    state = REC_IDLE;
-                    g_app.mode = SYS_MODE_IDLE;
-                    first_sample = true;
-                    start_time = 0;
-                    return;
+                if (sample_count == FALSE_START_SAMPLES) {
+                    if (max_pressure <= initial_depth + TOLERANCE) {
+                        /* No significant descent — discard recording */
+                        filesystem_log_close();
+                        filesystem_log_delete(rec_filename);
+                        shell_printf("[recorder] False start — file %s removed\r\n",
+                                     rec_filename);
+                        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
+                        g_app.start_flag = false;
+                        state = REC_IDLE;
+                        g_app.mode = SYS_MODE_IDLE;
+                        first_sample = true;
+                        start_time = 0;
+                        return;
+                    }
+                    /* Passed false-start check — record filename for realtime */
+                    strncpy(last_successful_filename, rec_filename,
+                            sizeof(last_successful_filename));
                 }
             }
 
@@ -341,4 +354,9 @@ void recorder_service(void)
         }
         break;
     }
+}
+
+const char *recorder_get_last_filename(void)
+{
+    return last_successful_filename[0] ? last_successful_filename : NULL;
 }

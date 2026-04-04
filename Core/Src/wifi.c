@@ -330,6 +330,14 @@ void wifi_service(void)
             wifi_last_eol = byte;
             wifi_cmd_buf[wifi_cmd_pos] = '\0';
             if (wifi_cmd_pos > 0) {
+                if (strstr(wifi_cmd_buf, "ERROR") != NULL) {
+                    /* Module rebooted and is back in AT command mode. */
+                    shell_printf("[wifi] Module reset detected, reinitializing...\r\n");
+                    wifi_cmd_pos = 0;
+                    memset(wifi_cmd_buf, 0, sizeof(wifi_cmd_buf));
+                    wifi_init(wifi_huart);
+                    return;
+                }
                 shell_dispatch(wifi_cmd_buf);
                 wifi_cmd_pos = 0;
                 memset(wifi_cmd_buf, 0, sizeof(wifi_cmd_buf));

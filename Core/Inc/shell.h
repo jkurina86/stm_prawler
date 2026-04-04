@@ -17,6 +17,7 @@ extern "C" {
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 
 /* Exported types ------------------------------------------------------------*/
 typedef struct {
@@ -47,7 +48,7 @@ void shell_process_char(uint8_t ch);
 void shell_print(const char *str);
 void shell_printf(const char *format, ...);
 void shell_task(void);
-void shell_dispatch(char *cmd_line);
+bool shell_dispatch(char *cmd_line);
 void shell_uart_receive_callback(void);
 
 /* Command functions */
@@ -85,6 +86,9 @@ void cmd_config(int argc, char **argv);
 
 /* WiFi */
 void cmd_wifi_status(int argc, char **argv);
+
+/* Realtime */
+void cmd_realtime(int argc, char **argv);
 
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);

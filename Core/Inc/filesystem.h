@@ -25,7 +25,8 @@ typedef enum {
     FS_INVALID_PARAM,
     FS_FILE_NOT_FOUND,
     FS_FILE_EXISTS,
-    FS_ACCESS_DENIED
+    FS_ACCESS_DENIED,
+    FS_EOF
 } FS_Result_t;
 
 /* Buffers for shell integration */
@@ -67,6 +68,14 @@ FS_Result_t filesystem_log_write(const uint8_t *data, uint16_t len);
 FS_Result_t filesystem_log_sync(void);
 FS_Result_t filesystem_log_close(void);
 FS_Result_t filesystem_log_delete(const char *filename);
+
+/* File search operations */
+FS_Result_t filesystem_find_latest(const char *suffix, char *out, int out_size);
+
+/* Sequential read operations */
+FS_Result_t filesystem_open_read(const char *filename);
+FS_Result_t filesystem_readline(char *buf, int maxlen);
+FS_Result_t filesystem_close_read(void);
 
 /* Buffer management for shell integration */
 FS_Buffers_t* filesystem_get_buffers(void);

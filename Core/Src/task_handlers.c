@@ -16,6 +16,7 @@
 #include "sensors.h"
 #include "config.h"
 #include "wifi.h"
+#include "realtime_comm.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -639,4 +640,10 @@ void handle_wifi_status(const void *arg)
     wifi_state_t st = wifi_get_state();
     shell_printf("WiFi state: %s (rx buf: %u bytes)\r\n",
                  state_names[st], wifi_available());
+}
+
+void handle_realtime(const void *arg)
+{
+    (void)arg;
+    realtime_comm_stream();
 }

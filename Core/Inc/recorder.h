@@ -17,6 +17,7 @@ extern "C" {
 /* Exported function prototypes ----------------------------------------------*/
 void recorder_init(void);
 void recorder_service(void);
+const char *recorder_get_last_filename(void);
 
 #ifdef __cplusplus
 }

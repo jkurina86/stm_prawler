@@ -418,6 +418,88 @@ FS_Result_t filesystem_log_delete(const char *filename) {
 
 
 /**
+  * @brief Find the file with the latest modification date matching a suffix
+  * @param suffix: Filename suffix to match (e.g., "_record.csv")
+  * @param out: Buffer to receive the filename
+  * @param out_size: Size of the output buffer
+  * @retval FS_OK if a matching file was found, FS_FILE_NOT_FOUND otherwise
+  */
+FS_Result_t filesystem_find_latest(const char *suffix, char *out, int out_size) {
+    if (!fs_mounted) return FS_NOT_MOUNTED;
+    if (!suffix || !out || out_size <= 0) return FS_INVALID_PARAM;
+
+    DIR dir;
+    FILINFO fno;
+    WORD best_date = 0;
+    WORD best_time = 0;
+    bool found = false;
+
+    fs_result = f_opendir(&dir, fs_path);
+    if (fs_result != FR_OK)
+        return convert_fatfs_result(fs_result);
+
+    int suffix_len = strlen(suffix);
+
+    fs_result = f_readdir(&dir, &fno);
+    while (fs_result == FR_OK && fno.fname[0] != 0) {
+        if (!(fno.fattrib & AM_DIR)) {
+            int name_len = strlen(fno.fname);
+            if (name_len >= suffix_len &&
+                strcmp(fno.fname + name_len - suffix_len, suffix) == 0) {
+                /* Compare FAT date/time (higher = newer) */
+                if (fno.fdate > best_date ||
+                    (fno.fdate == best_date && fno.ftime > best_time)) {
+                    best_date = fno.fdate;
+                    best_time = fno.ftime;
+                    strncpy(out, fno.fname, out_size - 1);
+                    out[out_size - 1] = '\0';
+                    found = true;
+                }
+            }
+        }
+        fs_result = f_readdir(&dir, &fno);
+    }
+
+    f_closedir(&dir);
+    return found ? FS_OK : FS_FILE_NOT_FOUND;
+}
+
+/**
+  * @brief Open a file for sequential reading
+  * @param filename: Name of the file to open
+  * @retval FS_Result_t: Result of the operation
+  */
+FS_Result_t filesystem_open_read(const char *filename) {
+    if (!fs_mounted) return FS_NOT_MOUNTED;
+    if (!filename)   return FS_INVALID_PARAM;
+
+    fs_result = f_open(&fil, filename, FA_READ);
+    return (fs_result == FR_OK) ? FS_OK : convert_fatfs_result(fs_result);
+}
+
+/**
+  * @brief Read the next line from an open file
+  * @param buf: Buffer to store the line
+  * @param maxlen: Maximum buffer length
+  * @retval FS_OK on success, FS_EOF at end of file
+  */
+FS_Result_t filesystem_readline(char *buf, int maxlen) {
+    if (!fs_mounted) return FS_NOT_MOUNTED;
+
+    TCHAR *result = f_gets(buf, maxlen, &fil);
+    return (result != NULL) ? FS_OK : FS_EOF;
+}
+
+/**
+  * @brief Close a file opened for reading
+  * @retval FS_Result_t: Result of the operation
+  */
+FS_Result_t filesystem_close_read(void) {
+    fs_result = f_close(&fil);
+    return (fs_result == FR_OK) ? FS_OK : convert_fatfs_result(fs_result);
+}
+
+/**
   * @brief Get filesystem buffers for shell integration
   * @retval FS_Buffers_t*: Pointer to filesystem buffers
   */

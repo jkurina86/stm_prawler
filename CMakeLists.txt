@@ -57,6 +57,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/sensors.c
     Core/Src/config.c
     Core/Src/wifi.c
+    Core/Src/realtime_comm.c
 )
 
 # Add include paths

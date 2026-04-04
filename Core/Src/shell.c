@@ -96,6 +96,9 @@ const shell_command_t shell_commands[] = {
     /* WiFi Commands */
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
 
+    /* Realtime Commands */
+    {"realtime", "Stream last recording over WiFi", cmd_realtime},
+
     {NULL, NULL, NULL} /* End marker */
 };
 
@@ -106,11 +109,24 @@ static int shell_parse_command(char *cmd_line, char **argv);
 /**
  * @brief  Public command dispatch -- parses and executes a command string.
  * @note   Used by the WiFi shell to reuse the UART shell's command table.
- *         The caller's buffer is modified by strtok (same as UART shell).
+ *         Returns false for unknown commands (unlike the UART shell which
+ *         prints an error).  The caller's buffer is modified by strtok.
+ * @retval true if command was found and executed, false otherwise.
  */
-void shell_dispatch(char *cmd_line)
+bool shell_dispatch(char *cmd_line)
 {
-    shell_execute_command(cmd_line);
+    char *argv[SHELL_MAX_ARGS];
+    int argc = shell_parse_command(cmd_line, argv);
+    if (argc == 0)
+        return true;  /* empty line is not an error */
+
+    for (int i = 0; shell_commands[i].name != NULL; i++) {
+        if (strcmp(argv[0], shell_commands[i].name) == 0) {
+            shell_commands[i].function(argc, argv);
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Public functions ----------------------------------------------------------*/
@@ -697,6 +713,12 @@ void cmd_wifi_status(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_wifi_status, NULL, 0);
+}
+
+void cmd_realtime(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_realtime, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/
