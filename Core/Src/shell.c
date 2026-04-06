@@ -95,6 +95,7 @@ const shell_command_t shell_commands[] = {
 
     /* WiFi Commands */
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
+    {"wifi-init", "Re-initialize WiFi module", cmd_wifi_init},
 
     /* Realtime Commands */
     {"realtime", "Stream last recording over WiFi", cmd_realtime},
@@ -713,6 +714,12 @@ void cmd_wifi_status(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_wifi_status, NULL, 0);
+}
+
+void cmd_wifi_init(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_wifi_init, NULL, 0);
 }
 
 void cmd_realtime(int argc, char **argv)

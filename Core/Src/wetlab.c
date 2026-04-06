@@ -67,12 +67,15 @@ static uint16_t wetlab_stop_rx(void)
     HAL_UART_AbortReceive(wetlab_huart);
     if (total < WETLAB_BUF_SIZE)
         rx_buf[total] = '\0';
-    /* Replace any embedded NULs (from power-on transient) with spaces
-     * so string functions can scan the full buffer */
-    for (uint16_t i = 0; i < total; i++) {
-        if (rx_buf[i] == '\0')
-            rx_buf[i] = ' ';
+    /* Remove any embedded NULs (from power-on transient)
+     * by shifting the remaining data left */
+    uint16_t dst = 0;
+    for (uint16_t src = 0; src < total; src++) {
+        if (rx_buf[src] != '\0')
+            rx_buf[dst++] = rx_buf[src];
     }
+    total = dst;
+    rx_buf[total] = '\0';
     return total;
 }
 
@@ -90,6 +93,10 @@ static bool wetlab_parse(const char *line, wetlab_data_t *out)
                &cl, &cs, &nl, &ns, &dl, &ds, &th) != 13) {
         return false;
     }
+    /* Validate signal counts are within classic mode range (0–4130) */
+    if (cs > 4130 || ns > 4130 || ds > 4130)
+        return false;
+
     out->chl_lambda   = (uint16_t)cl;
     out->chl_signal   = (uint16_t)cs;
     out->ntu_lambda   = (uint16_t)nl;

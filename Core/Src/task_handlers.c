@@ -642,6 +642,15 @@ void handle_wifi_status(const void *arg)
                  state_names[st], wifi_available());
 }
 
+void handle_wifi_init(const void *arg)
+{
+    (void)arg;
+    shell_print("[wifi] Re-initializing...\r\n");
+    wifi_init(&huart4);
+    shell_printf("[wifi] Done — state: %s\r\n",
+                 wifi_get_state() == WIFI_STATE_STREAMING ? "STREAMING" : "ERROR");
+}
+
 void handle_realtime(const void *arg)
 {
     (void)arg;

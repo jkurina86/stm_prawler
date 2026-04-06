@@ -76,6 +76,7 @@ void handle_config(const void *arg);
 
 /* WiFi */
 void handle_wifi_status(const void *arg);
+void handle_wifi_init(const void *arg);
 
 /* Realtime */
 void handle_realtime(const void *arg);
