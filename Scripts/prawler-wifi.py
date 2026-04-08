@@ -6,14 +6,17 @@ AP (SSID: prawler) with a TCP server on port 5000 in passthrough mode (PX).
 This script configures the local module as a station, connects to the AP,
 enters passthrough mode, then provides an interactive shell console.
 
+The script automatically detects connection loss and reconnects.
+
 Usage: py -3 prawler-wifi.py [--port COM10]
 """
 
-import serial
+import argparse
+import sys
 import threading
 import time
-import sys
-import argparse
+
+import serial
 
 # --- Configuration (must match wifi.h on the prawler board) ---
 PORT = "COM10"
@@ -21,9 +24,14 @@ BAUD = 115200
 TIMEOUT = 2
 
 AP_SSID = "prawler"
-AP_SECURITY = 0         # 0 = Open
+AP_SECURITY = 0  # 0 = Open
 AP_IP = "192.168.10.1"
 TCP_PORT = 5000
+
+# Resilience settings
+KEEPALIVE_MS = 30000  # TCP keep-alive idle timeout (ms)
+RECONNECT_DELAY = 5  # Seconds to wait between reconnect attempts
+MAX_RECONNECT_ATTEMPTS = 0  # 0 = unlimited
 # --------------------------------------------------------------
 
 
@@ -76,6 +84,24 @@ def check_passthrough(ser):
     return False
 
 
+def is_in_at_mode(ser):
+    """Check if the local module is in AT command mode (not streaming).
+
+    Sends an empty \\r.  In AT mode the module responds with '> ' prompt.
+    In streaming mode the bytes go to the TCP peer and we get nothing back
+    (or the prawler shell prompt, which also contains '> ' but that's fine).
+    """
+    saved_timeout = ser.timeout
+    ser.timeout = 1
+    ser.reset_input_buffer()
+    ser.write(b"\r")
+    data = ser.read(64)
+    ser.timeout = saved_timeout
+    # AT mode gives back \r\n\r\nOK\r\n> or similar with the prompt
+    text = data.decode("ascii", errors="replace")
+    return "OK" in text or "> " in text
+
+
 def hard_reset(ser):
     """Software-reset the local ISM4343 module and wait for boot."""
     print("[local] Resetting module...")
@@ -94,8 +120,18 @@ def setup_station(ser):
     expect_ok(ser, f"C3={AP_SECURITY}", "Set Security Type")
     expect_ok(ser, "C4=1", "Enable DHCP")
 
+    # Enable auto-join + auto-reconnect so the module re-associates
+    # with the prawler AP if the WiFi link drops
+    expect_ok(ser, "CC=3", "Enable Auto-Reconnect")
+
+    # Disable power save to keep the radio active during idle periods
+    expect_ok(ser, "ZP=1,0", "Disable Power Save")
+
+    # Save these settings so they survive a module reset
+    expect_ok(ser, "Z1", "Save Settings")
+
     resp = send_cmd(ser, "C0", timeout=20)
-    if "ERROR" in resp:
+    if "ERROR" in resp and "Already connected" not in resp:
         raise RuntimeError(f"Failed to join AP: {resp}")
     print(f"[local] Joined AP.")
 
@@ -112,6 +148,9 @@ def setup_tcp_client(ser):
     expect_ok(ser, f"P4={TCP_PORT}", "Set Remote Port")
     expect_ok(ser, "S1=1460", "Set Write Packet Size")
     expect_ok(ser, "S2=50", "Set Write Timeout")
+
+    # Enable TCP keep-alive so the client detects a dead server
+    expect_ok(ser, f"PK=1,{KEEPALIVE_MS}", "Enable TCP Keep-Alive")
 
     resp = send_cmd(ser, "P6=1", timeout=15)
     if "ERROR" in resp:
@@ -131,15 +170,93 @@ def setup_tcp_client(ser):
     print("[local] Passthrough active.")
 
 
-def receiver_thread(ser, stop_event):
-    """Background thread that reads raw bytes from the passthrough link."""
+def connect(ser):
+    """Run the full connection sequence: station join + TCP client setup.
+
+    Returns True on success, False on failure.
+    """
+    try:
+        if not check_passthrough(ser):
+            setup_station(ser)
+            time.sleep(1)
+            setup_tcp_client(ser)
+        return True
+    except Exception as e:
+        print(f"[local] Connection failed: {e}")
+        return False
+
+
+def reconnect(ser):
+    """Attempt to re-establish the connection after a drop.
+
+    Resets the module and runs the full setup sequence again.
+    Returns True on success, False if all attempts are exhausted.
+    """
+    attempt = 0
+    while MAX_RECONNECT_ATTEMPTS == 0 or attempt < MAX_RECONNECT_ATTEMPTS:
+        attempt += 1
+        print(f"\n[local] Reconnect attempt {attempt}...")
+        print(f"[local] Waiting {RECONNECT_DELAY}s before retry...")
+        time.sleep(RECONNECT_DELAY)
+
+        try:
+            # Make sure we're back in AT command mode.  If the module
+            # already dropped out of streaming on its own (keep-alive
+            # failure or TCP close), we should be there.  If not, a
+            # hard reset will get us there.
+            if not is_in_at_mode(ser):
+                hard_reset(ser)
+
+            setup_station(ser)
+            time.sleep(1)
+            setup_tcp_client(ser)
+            print("[local] Reconnected successfully!")
+            return True
+        except Exception as e:
+            print(f"[local] Reconnect attempt {attempt} failed: {e}")
+
+    print("[local] All reconnect attempts exhausted.")
+    return False
+
+
+def detect_disconnect(data):
+    """Check if received data indicates the module dropped out of streaming.
+
+    When the TCP connection dies and keep-alive detects it, the module
+    exits passthrough and reverts to AT command mode.  We'll start seeing
+    AT-mode output like 'ERROR', '[AP ...', 'OK', or the '> ' prompt
+    instead of prawler shell data.
+    """
+    text = data.decode("ascii", errors="replace")
+    indicators = ["ERROR", "[AP ", "\r\nOK\r\n"]
+    return any(ind in text for ind in indicators)
+
+
+def receiver_thread(ser, stop_event, disconnect_event):
+    """Background thread that reads raw bytes from the passthrough link.
+
+    Sets disconnect_event if the connection appears to have dropped.
+    """
+    idle_count = 0
     while not stop_event.is_set():
         try:
             data = ser.read(ser.in_waiting or 1)
             if data:
+                idle_count = 0
+                if detect_disconnect(data):
+                    print("\n[local] Connection lost (module exited streaming).")
+                    disconnect_event.set()
+                    return
                 text = data.decode("ascii", errors="replace")
                 sys.stdout.write(text)
                 sys.stdout.flush()
+            else:
+                idle_count += 1
+        except serial.SerialException:
+            if not stop_event.is_set():
+                print("\n[local] Serial error -- connection lost.")
+                disconnect_event.set()
+                return
         except Exception:
             if not stop_event.is_set():
                 time.sleep(0.1)
@@ -150,8 +267,9 @@ def main():
         description="Connect to STM-PRAWLER board over WiFi"
     )
     parser.add_argument(
-        "--port", default=PORT,
-        help=f"Serial port for local ISM4343 module (default: {PORT})"
+        "--port",
+        default=PORT,
+        help=f"Serial port for local ISM4343 module (default: {PORT})",
     )
     args = parser.parse_args()
 
@@ -172,45 +290,84 @@ def main():
     stop_event = threading.Event()
 
     try:
-        if not check_passthrough(ser):
-            setup_station(ser)
-            time.sleep(1)
-            setup_tcp_client(ser)
-
-        # Start receiver thread for incoming data
-        rx = threading.Thread(
-            target=receiver_thread,
-            args=(ser, stop_event),
-            daemon=True,
-        )
-        rx.start()
-
-        # Send \n to solicit initial prompt from prawler
-        ser.write(b"\n")
-
-        print()
-        print("=" * 60)
-        print("  Connected to prawler WiFi shell!")
-        print()
-        print("  Type a command and press Enter.")
-        print("  Type 'quit' to exit.")
-        print("=" * 60)
-        print()
+        if not connect(ser):
+            if not reconnect(ser):
+                print("Could not establish initial connection.")
+                sys.exit(1)
 
         while True:
-            try:
-                user_input = input("")
-            except (EOFError, KeyboardInterrupt):
+            # Start receiver thread for incoming data
+            disconnect_event = threading.Event()
+            rx = threading.Thread(
+                target=receiver_thread,
+                args=(ser, stop_event, disconnect_event),
+                daemon=True,
+            )
+            rx.start()
+
+            # Send \n to solicit initial prompt from prawler
+            ser.write(b"\n")
+
+            print()
+            print("=" * 60)
+            print("  Connected to prawler WiFi shell!")
+            print()
+            print("  Type a command and press Enter.")
+            print("  Type 'quit' to exit.")
+            print("=" * 60)
+            print()
+
+            # Interactive loop -- also watches for disconnect
+            session_active = True
+            while session_active:
+                # Check if receiver thread flagged a disconnect
+                if disconnect_event.is_set():
+                    session_active = False
+                    break
+
+                try:
+                    # Use a short timeout so we can check disconnect_event
+                    # between input attempts.  On Windows, input() blocks,
+                    # so we rely on the receiver thread to flag disconnect.
+                    user_input = input("")
+                except (EOFError, KeyboardInterrupt):
+                    stop_event.set()
+                    session_active = False
+                    break
+
+                if user_input.strip().lower() == "quit":
+                    stop_event.set()
+                    session_active = False
+                    break
+
+                if disconnect_event.is_set():
+                    session_active = False
+                    break
+
+                try:
+                    ser.write((user_input + "\r").encode())
+                except serial.SerialException:
+                    print("\n[local] Write failed -- connection lost.")
+                    disconnect_event.set()
+                    session_active = False
+                    break
+
+            # If we got here via disconnect (not quit), try to reconnect
+            if stop_event.is_set():
                 break
 
-            if user_input.strip().lower() == "quit":
-                break
+            # Wait for receiver thread to finish
+            rx.join(timeout=2)
 
-            ser.write((user_input + "\r").encode())
+            print("\n[local] Session ended. Attempting reconnect...")
+            if not reconnect(ser):
+                print("Could not reconnect. Exiting.")
+                break
 
     except Exception as e:
         print(f"\nError: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         print("\nCleaning up...")

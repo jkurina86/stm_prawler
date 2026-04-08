@@ -180,13 +180,17 @@ static bool wifi_setup_ap(void)
     wifi_soft_reset();
 
     shell_printf("[wifi] Configuring Access Point...\r\n");
-    if (!wifi_expect_ok("AS=0," WIFI_AP_SSID,    "Set AP SSID",    5000))
+    if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 5000))
         return false;
-    if (!wifi_expect_ok("A1=" WIFI_AP_SECURITY,  "Set AP Security", 5000))
+    if (!wifi_expect_ok("A1=" WIFI_AP_SECURITY, "Set AP Security", 5000))
         return false;
-    if (!wifi_expect_ok("AC=" WIFI_AP_CHANNEL,   "Set AP Channel",  5000))
+    if (!wifi_expect_ok("AC=" WIFI_AP_CHANNEL, "Set AP Channel", 5000))
         return false;
-    if (!wifi_expect_ok("Z6=" WIFI_AP_IP,        "Set AP IP",       5000))
+    if (!wifi_expect_ok("Z6=" WIFI_AP_IP, "Set AP IP", 5000))
+        return false;
+    if (!wifi_expect_ok("ZP=1,0", "Disable Power Save", 5000))
+        return false;
+    if (!wifi_expect_ok("AL=255", "Set DHCP Lease Time", 5000))
         return false;
 
     shell_printf("[wifi] Starting Access Point...\r\n");
@@ -212,6 +216,8 @@ static bool wifi_setup_tcp_server(void)
     if (!wifi_expect_ok("S1=1460", "Set Write Packet Size", 5000))
         return false;
     if (!wifi_expect_ok("S2=50", "Set Write Timeout", 5000))
+        return false;
+    if (!wifi_expect_ok("PK=1,30000", "Enable TCP Keep-Alive", 5000))
         return false;
 
     /* Enter streaming mode -- this is the last AT command.
