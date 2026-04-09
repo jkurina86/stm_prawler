@@ -296,7 +296,8 @@ void recorder_service(void)
                     }
                     /* Passed false-start check — record filename for realtime */
                     strncpy(last_successful_filename, rec_filename,
-                            sizeof(last_successful_filename));
+                            sizeof(last_successful_filename) - 1);
+                    last_successful_filename[sizeof(last_successful_filename) - 1] = '\0';
                 }
             }
 
