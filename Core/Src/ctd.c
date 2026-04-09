@@ -187,17 +187,17 @@ bool ctd_ts(ctd_data_t *out)
 
     rx_buf[total] = '\0';
 
-    /* Parse: response contains "ts\r\n  cond, temp, pres\r\nS>" */
+    /* Parse: response contains "ts\r\n  pres, temp, cond\r\nS>" */
     /* Find the data line — first line containing a comma */
     char *line = strtok((char *)rx_buf, "\r\n");
     while (line) {
         if (strchr(line, ',')) {
             char *end;
-            out->conductivity = strtof(line, &end);
+            out->pressure = strtof(line, &end);
             if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
             out->temperature = strtof(end + 1, &end);
             if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
-            out->pressure = strtof(end + 1, &end);
+            out->conductivity = strtof(end + 1, &end);
             return true;
         }
         line = strtok(NULL, "\r\n");
