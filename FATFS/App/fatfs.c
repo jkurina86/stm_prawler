@@ -24,7 +24,7 @@ FATFS USERFatFS;    /* File system object for USER logical drive */
 FIL USERFile;       /* File object for USER */
 
 /* USER CODE BEGIN Variables */
-
+#include "ab-rtcmc-rtc.h"
 /* USER CODE END Variables */
 
 void MX_FATFS_Init(void)
@@ -45,7 +45,15 @@ void MX_FATFS_Init(void)
 DWORD get_fattime(void)
 {
   /* USER CODE BEGIN get_fattime */
-  return 0;
+  RTC_DateTime_t dt;
+  if (RTC_GetDateTime(&dt) != RTC_OK)
+      return 0;
+  return ((DWORD)(dt.years + 20) << 25) |
+         ((DWORD)dt.months << 21)        |
+         ((DWORD)dt.days << 16)          |
+         ((DWORD)dt.hours << 11)         |
+         ((DWORD)dt.minutes << 5)        |
+         ((DWORD)(dt.seconds / 2));
   /* USER CODE END get_fattime */
 }
 
