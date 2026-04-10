@@ -25,7 +25,6 @@
 #include "shell.h"
 #include "ctd.h"
 #include "optode.h"
-#include "wetlab.h"
 #include "wifi.h"
 #include "config.h"
 /* USER CODE END Includes */
@@ -494,8 +493,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
         ctd_notify_rx_event(Size);
     else if (huart->Instance == USART2)
         optode_notify_rx_event(Size);
-    else if (huart->Instance == UART5)
-        wetlab_notify_rx_event(Size);
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)

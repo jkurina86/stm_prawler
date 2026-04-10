@@ -284,13 +284,16 @@ uint16_t wifi_write(const uint8_t *data, uint16_t len)
 
 void wifi_printf(const char *format, ...)
 {
-    char buffer[256];
+    char buffer[WIFI_PRINTF_BUF_SIZE];
     va_list args;
     va_start(args, format);
     int len = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    if (len > 0)
+    if (len > 0) {
+        if ((size_t)len > sizeof(buffer) - 1)
+            len = sizeof(buffer) - 1;
         wifi_write((const uint8_t *)buffer, (uint16_t)len);
+    }
 }
 
 uint16_t wifi_read(uint8_t *buf, uint16_t buf_size)

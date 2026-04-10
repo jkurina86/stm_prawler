@@ -39,9 +39,6 @@ void wetlab_raw(void);
 bool wetlab_fire(void);
 bool wetlab_collect(wetlab_data_t *out);
 
-/* Callback notify functions (called from centralized HAL callbacks) */
-void wetlab_notify_rx_event(uint16_t size);
-
 #ifdef __cplusplus
 }
 #endif

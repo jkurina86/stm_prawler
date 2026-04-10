@@ -43,7 +43,6 @@ static uint16_t buf_offset;
 
 static rec_state_t state;
 static uint32_t start_time;
-static bool first_sample;
 static float initial_depth = 0.0f;
 static float max_pressure;
 static uint16_t sample_count;
@@ -246,7 +245,6 @@ void recorder_service(void)
             /* Take first sample immediately */
             sample_and_record();
             sample_count = 0;
-            first_sample = false;
             next_sample_tick = HAL_GetTick() + SAMPLE_INTERVAL;
             start_time = HAL_GetTick();
             initial_depth = reading.ctd.pressure;
@@ -290,7 +288,6 @@ void recorder_service(void)
                         g_app.start_flag = false;
                         state = REC_IDLE;
                         g_app.mode = SYS_MODE_IDLE;
-                        first_sample = true;
                         start_time = 0;
                         return;
                     }
@@ -349,7 +346,6 @@ void recorder_service(void)
                 g_app.start_flag = false;
                 state = REC_IDLE;
                 g_app.mode = SYS_MODE_IDLE;
-                first_sample = true;
                 start_time = 0;
             }
         }

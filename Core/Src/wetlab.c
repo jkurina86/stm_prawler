@@ -9,6 +9,7 @@
   */
 
 #include "wetlab.h"
+#include "config.h"
 #include "shell.h"
 #include <string.h>
 #include <stdio.h>
@@ -20,12 +21,6 @@
 static UART_HandleTypeDef *wetlab_huart;
 static uint8_t rx_buf[WETLAB_BUF_SIZE];
 
-/* Callback notify functions (called from centralized HAL callbacks) ----------*/
-
-void wetlab_notify_rx_event(uint16_t size)
-{
-    (void)size;
-}
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -164,7 +159,7 @@ bool wetlab_sample(wetlab_data_t *out)
         return false;
     }
 
-    HAL_Delay(900);
+    HAL_Delay(WETLAB_SAMPLE_WAIT_MS);
 
     uint16_t total = wetlab_stop_rx();
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);

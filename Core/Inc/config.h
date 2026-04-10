@@ -21,6 +21,19 @@ extern "C" {
 #define SENSOR_CFG_CTD_OPTODE     2   /* CTD + Optode */
 #define SENSOR_CFG_ALL            3   /* CTD + Optode + WetLab */
 
+/* Timing constants (ms) */
+#define WETLAB_BOOT_MS              1500  /* Power-on to first valid data */
+#define SENSOR_COLLECT_WINDOW_MS    1200  /* DMA collection window after fire */
+#define WETLAB_SAMPLE_WAIT_MS        900  /* Delay for WetLab blocking sample */
+#define CTD_WAKEUP_TIMEOUT_MS         50  /* Per-attempt RX wait during wakeup */
+#define CTD_WAKEUP_RETRIES            10  /* Max wakeup attempts */
+#define OPTODE_WAKE_DELAY_MS         500  /* Delay after first (garbled) wake */
+
+/* Buffer sizes */
+#define CTD_RX_BUF_SIZE             1024
+#define OPTODE_RX_BUF_SIZE          1024
+#define WIFI_PRINTF_BUF_SIZE         256
+
 /* Number of measurements per recording session */
 #define MEASUREMENTS_CTD_ONLY     315
 #define MEASUREMENTS_CTD_OPTODE   205

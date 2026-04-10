@@ -8,6 +8,7 @@
   */
 
 #include "ctd.h"
+#include "config.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,7 +17,7 @@ static UART_HandleTypeDef *ctd_huart;
 static volatile bool tx_done = false;
 static volatile bool rx_done = false;
 static volatile uint16_t rx_len = 0;
-static uint8_t rx_buf[1024];
+static uint8_t rx_buf[CTD_RX_BUF_SIZE];
 
 /* Callback notify functions (called from centralized HAL callbacks) ----------*/
 
@@ -65,7 +66,7 @@ bool ctd_wakeup(void)
      * itself is often lost (receiver wasn't active).  Retry until the device
      * actually responds, confirming it is awake and ready for commands.
      */
-    for (int attempt = 0; attempt < 10; attempt++) {
+    for (int attempt = 0; attempt < CTD_WAKEUP_RETRIES; attempt++) {
         ctd_reset_uart();
 
         rx_done = false;
@@ -95,7 +96,7 @@ bool ctd_wakeup(void)
         /* Wait up to 50 ms for the CTD to respond */
         t0 = HAL_GetTick();
         while (!rx_done) {
-            if ((HAL_GetTick() - t0) > 50)
+            if ((HAL_GetTick() - t0) > CTD_WAKEUP_TIMEOUT_MS)
                 break;
         }
 

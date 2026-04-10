@@ -35,14 +35,14 @@ void sensors_sample(sensor_reading_t *reading)
         reading->optode_ok = optode_fire();
 
     /* 4. Wait for WetLab to start auto-transmitting */
-    HAL_Delay(1500);
+    HAL_Delay(WETLAB_BOOT_MS);
 
     /* 5. Fire WetLab */
     if (has_wetlab)
         reading->wetlab_ok = wetlab_fire();
 
     /* 6. Wait for data collection */
-    HAL_Delay(1200);
+    HAL_Delay(SENSOR_COLLECT_WINDOW_MS);
 
     /* 7. Collect results */
     reading->ctd_ok = ctd_collect(&reading->ctd);

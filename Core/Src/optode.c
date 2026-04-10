@@ -21,7 +21,7 @@ static UART_HandleTypeDef *optode_huart;
 static volatile bool tx_done = false;
 static volatile bool rx_done = false;
 static volatile uint16_t rx_len = 0;
-static uint8_t rx_buf[1024];
+static uint8_t rx_buf[OPTODE_RX_BUF_SIZE];
 
 /*
  * Wake-up preamble: '/' comment characters
@@ -244,7 +244,7 @@ void optode_wake(void)
     }
 
     /* Wait up to 500 ms for any error response, then discard */
-    HAL_Delay(500);
+    HAL_Delay(OPTODE_WAKE_DELAY_MS);
     HAL_UART_AbortReceive(optode_huart);
 }
 
