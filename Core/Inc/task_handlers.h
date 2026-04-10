@@ -32,6 +32,10 @@ typedef struct {
 } rtc_settime_args_t;
 
 typedef struct {
+    uint32_t unix_epoch;
+} settime_args_t;
+
+typedef struct {
     uint16_t seconds;
 } rtc_timer_set_args_t;
 
@@ -49,6 +53,7 @@ void handle_status(const void *arg);
 void handle_reset(const void *arg);
 void handle_version(const void *arg);
 /* RTC */
+void handle_settime(const void *arg);
 void handle_rtc_settime(const void *arg);
 void handle_rtc_gettime(const void *arg);
 void handle_rtc_temp(const void *arg);

@@ -985,3 +985,49 @@ uint32_t RTC_ToGPSEpoch(const RTC_DateTime_t *dt)
 
     return days * 86400UL + dt->hours * 3600UL + dt->minutes * 60UL + dt->seconds;
 }
+
+/**
+  * @brief  Convert Unix epoch seconds to RTC date/time
+  * @param  unix_epoch: Seconds since Jan 1, 1970 00:00:00 UTC
+  * @param  dt: Pointer to RTC_DateTime_t to fill (years field = 0-99 for 2000-2099)
+  */
+void RTC_FromUnixEpoch(uint32_t unix_epoch, RTC_DateTime_t *dt)
+{
+    uint32_t rem = unix_epoch;
+
+    uint32_t secs = rem % 86400UL;
+    uint32_t days = rem / 86400UL;
+
+    dt->hours   = (uint8_t)(secs / 3600);
+    dt->minutes = (uint8_t)((secs % 3600) / 60);
+    dt->seconds = (uint8_t)(secs % 60);
+
+    /* Jan 1 1970 was a Thursday (weekday 5 in 1=Sun convention) */
+    dt->weekdays = (uint8_t)((days + 4) % 7 + 1);
+
+    /* Walk years from 1970 */
+    uint16_t year = 1970;
+    while (true) {
+        uint16_t ydays = RTC_IsLeapYear(year) ? 366 : 365;
+        if (days < ydays)
+            break;
+        days -= ydays;
+        year++;
+    }
+
+    /* Walk months */
+    uint8_t month = 1;
+    while (month <= 12) {
+        uint8_t mdays = RTC_GetDaysInMonth(month, year);
+        if (days < mdays)
+            break;
+        days -= mdays;
+        month++;
+    }
+
+    dt->years  = (uint8_t)(year - 2000);
+    dt->months = month;
+    dt->days   = (uint8_t)(days + 1);
+    dt->is_12h_format = false;
+    dt->is_pm = false;
+}

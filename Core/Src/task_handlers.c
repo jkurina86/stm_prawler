@@ -107,6 +107,32 @@ void handle_version(const void *arg)
 
 /* RTC Handlers -----------------------------------------------------------*/
 
+/** @brief  Handle the "settime" command (Unix epoch)
+  * @param  arg: Pointer to settime_args_t
+  * @retval None
+  */
+void handle_settime(const void *arg)
+{
+    const settime_args_t *a = (const settime_args_t *)arg;
+
+    if (a->unix_epoch == 0) {
+        shell_print("Usage: settime <UNIX_EPOCH>\r\n");
+        return;
+    }
+
+    RTC_DateTime_t dt = {0};
+    RTC_FromUnixEpoch(a->unix_epoch, &dt);
+
+    RTC_Status_t status = RTC_SetDateTime(&dt);
+    if (status == RTC_OK) {
+        shell_printf("RTC set to 20%02u-%02u-%02u %02u:%02u:%02u\r\n",
+                     dt.years, dt.months, dt.days,
+                     dt.hours, dt.minutes, dt.seconds);
+    } else {
+        shell_printf("RTC set time failed (err %d)\r\n", status);
+    }
+}
+
 /** @brief  Handle the "rtc-settime" command
   * @param  arg: Pointer to arguments (not used)
   * @retval None

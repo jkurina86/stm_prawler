@@ -59,6 +59,7 @@ void cmd_pb8(int argc, char **argv);
 void cmd_reset(int argc, char **argv);
 void cmd_version(int argc, char **argv);
 /* RTC Command functions */
+void cmd_settime(int argc, char **argv);
 void cmd_rtc_settime(int argc, char **argv);
 void cmd_rtc_gettime(int argc, char **argv);
 void cmd_rtc_temp(int argc, char **argv);

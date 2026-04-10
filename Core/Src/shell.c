@@ -56,6 +56,7 @@ const shell_command_t shell_commands[] = {
     {"version", "Show firmware version", cmd_version},
 
     /* RTC Commands */
+    {"settime", "Set RTC from Unix epoch", cmd_settime},
     {"rtc-settime", "Set RTC date/time (YYYY MM DD HH MM SS)", cmd_rtc_settime},
     {"rtc-time", "Get current RTC date/time", cmd_rtc_gettime},
     {"rtc-temp", "Get RTC temperature", cmd_rtc_temp},
@@ -361,6 +362,14 @@ void cmd_version(int argc, char **argv)
 }
 
 /* RTC Commands -----------------------------------------------*/
+
+void cmd_settime(int argc, char **argv)
+{
+    settime_args_t args = {0};
+    if (argc >= 2)
+        args.unix_epoch = strtoul(argv[1], NULL, 10);
+    tasker_enqueue(handle_settime, &args, sizeof(args));
+}
 
 /**
   * @brief Set RTC date and time
