@@ -16,6 +16,7 @@
 #include "ab-rtcmc-rtc.h"
 #include "sensors.h"
 #include "profile_data.h"
+#include "realtime_comm.h"
 #include "stm32l4xx_hal.h"
 #include "config.h"
 #include <string.h>
@@ -361,6 +362,11 @@ void recorder_service(void)
             norm_count++;
 
             if (norm_count >= NORM_SAMPLES) {
+                /* Build the realtime response from RAM before touching SD so
+                 * the client can still retrieve the profile even if the SD
+                 * flush fails. */
+                realtime_comm_build(&g_profile);
+
                 /* Done sampling — power SD back up and flush the profile. */
                 if (!sd_power_on_and_mount()) {
                     shell_print("[recorder] Profile data lost: SD restore failed\r\n");

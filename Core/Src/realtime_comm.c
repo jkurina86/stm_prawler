@@ -1,47 +1,80 @@
 /**
   ******************************************************************************
   * @file    realtime_comm.c
-  * @brief   Realtime CSV streaming over WiFi
-  * @note    Reads the last recording CSV from SD, transforms each row into a
-  *          compact integer-scaled format, and streams it line-by-line over
-  *          the WiFi TCP connection.
+  * @brief   Realtime hex-encoded CSV streaming over WiFi.
+  * @note    After each profile finishes normalizing, realtime_comm_build()
+  *          formats the full response into rt_buf (placed in SRAM2 via the
+  *          .ram2_bss linker section). realtime_comm_stream() then just
+  *          writes the pre-built buffer to the WiFi TCP client.
   ******************************************************************************
   */
 
 #include "realtime_comm.h"
-#include "recorder.h"
-#include "filesystem.h"
 #include "wifi.h"
 #include "shell.h"
-#include <stdlib.h>
-#include <string.h>
+#include <stdint.h>
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define GPS_TO_UNIX_OFFSET  315964800UL
-#define RT_LINE_SIZE        256
+#define RT_BUF_SIZE        18432   /* 18 KB: fits worst-case 346 rows + header */
+#define RT_ROW_RESERVE     64      /* defensive min free bytes before appending a row */
 
 /* Private variables ---------------------------------------------------------*/
-static char rt_line[RT_LINE_SIZE];
-
-/* Private functions ---------------------------------------------------------*/
-
-/**
-  * @brief  Skip past n comma-separated fields in a CSV line
-  * @param  p Pointer into CSV line
-  * @param  n Number of fields to skip
-  * @retval Pointer to start of the (n+1)th field, or NULL
-  */
-static const char *csv_skip(const char *p, int n)
-{
-    while (n > 0 && *p) {
-        if (*p == ',') n--;
-        p++;
-    }
-    return (n == 0) ? p : NULL;
-}
+static char rt_buf[RT_BUF_SIZE] __attribute__((section(".ram2_bss")));
+static uint16_t rt_len;
+/* Gate that prevents re-sending the same profile. Initialized to 1 so a
+ * realtime request before any profile has been built reports No_Data. */
+static uint8_t data_sent = 1;
 
 /* Public functions ----------------------------------------------------------*/
+
+void realtime_comm_build(const profile_data_t *profile)
+{
+    rt_len = 0;
+    data_sent = 0;
+
+    int n = snprintf(rt_buf, RT_BUF_SIZE,
+                     "datetime,depth,temp,cond,chl,ntu,cdom,o2,o2temp\r\n");
+    if (n < 0 || n >= RT_BUF_SIZE) {
+        rt_len = 0;
+        shell_print("[realtime] Header format failed\r\n");
+        return;
+    }
+    rt_len = (uint16_t)n;
+
+    for (uint16_t i = 0; i < profile->count; i++) {
+        if (RT_BUF_SIZE - rt_len < RT_ROW_RESERVE) {
+            shell_printf("[realtime] Buffer full at row %u\r\n", i);
+            break;
+        }
+
+        const measurement_data_t *m = &profile->measurements[i];
+
+        int16_t  depth  = (int16_t)(m->ctd.pressure      * 100.0f);
+        int16_t  temp   = (int16_t)(m->ctd.temperature   * 1000.0f);
+        int16_t  cond   = (int16_t)(m->ctd.conductivity  * 10000.0f);
+        uint16_t o2     = (uint16_t)(m->optode.o2_concentration * 100.0f);
+        uint16_t o2temp = (uint16_t)(m->optode.temperature      * 1000.0f);
+
+        int w = snprintf(rt_buf + rt_len, RT_BUF_SIZE - rt_len,
+                         "%08lx,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x\r\n",
+                         (unsigned long)m->timestamp,
+                         (uint16_t)depth, (uint16_t)temp, (uint16_t)cond,
+                         (uint16_t)m->wetlab.chl_signal,
+                         (uint16_t)m->wetlab.ntu_signal,
+                         (uint16_t)m->wetlab.cdom_signal,
+                         o2, o2temp);
+
+        if (w < 0 || (uint16_t)w >= RT_BUF_SIZE - rt_len) {
+            shell_printf("[realtime] Row %u format truncated\r\n", i);
+            break;
+        }
+        rt_len += (uint16_t)w;
+    }
+
+    shell_printf("[realtime] Built %u rows (%u bytes)\r\n",
+                 profile->count, rt_len);
+}
 
 void realtime_comm_stream(void)
 {
@@ -50,67 +83,13 @@ void realtime_comm_stream(void)
         return;
     }
 
-    const char *fname = recorder_get_last_filename();
-    if (fname == NULL) {
-        shell_print("[realtime] No recording available\r\n");
-        wifi_printf("[realtime] No recording available\r\n");
+    if (data_sent || rt_len == 0) {
+        shell_print("[realtime] No_Data\r\n");
+        wifi_printf("No_Data\r\n");
         return;
     }
 
-    shell_printf("[realtime] Streaming %s\r\n", fname);
-
-    if (filesystem_open_read(fname) != FS_OK) {
-        shell_print("[realtime] Open failed\r\n");
-        return;
-    }
-
-    /* Skip source CSV header */
-    if (filesystem_readline(rt_line, RT_LINE_SIZE) != FS_OK) {
-        shell_print("[realtime] Empty file\r\n");
-        filesystem_close_read();
-        return;
-    }
-
-    /* Send header */
-    wifi_printf("datetime,depth,temp,cond,chl,ntu,cdom,o2,o2temp\r\n");
-
-    /* Stream rows line-by-line */
-    uint32_t line_count = 0;
-    while (filesystem_readline(rt_line, RT_LINE_SIZE) == FS_OK) {
-        const char *p = rt_line;
-
-        /* Navigate to needed fields (0-indexed) */
-        const char *f1  = csv_skip(p, 1);   /* GPS_Epoch_UTC */
-        const char *f2  = csv_skip(p, 2);   /* CTD_C */
-        const char *f3  = csv_skip(p, 3);   /* CTD_T */
-        const char *f4  = csv_skip(p, 4);   /* CTD_D */
-        const char *f5  = csv_skip(p, 5);   /* Optode_O2 */
-        const char *f6  = csv_skip(p, 6);   /* Optode_Temp */
-        const char *f15 = csv_skip(p, 15);  /* Wetlab_C1_signal */
-        const char *f17 = csv_skip(p, 17);  /* Wetlab_C2_signal */
-        const char *f19 = csv_skip(p, 19);  /* Wetlab_C3_signal */
-
-        if (!f1 || !f2 || !f3 || !f4 || !f5 || !f6 || !f15 || !f17 || !f19)
-            continue;
-
-        uint32_t gps_epoch = strtoul(f1, NULL, 10);
-        uint32_t datetime  = gps_epoch + GPS_TO_UNIX_OFFSET;
-        int32_t  depth     = (int32_t)(strtof(f4, NULL) * 100);
-        int32_t  temp      = (int32_t)(strtof(f3, NULL) * 1000);
-        int32_t  cond      = (int32_t)(strtof(f2, NULL) * 10000);
-        uint16_t chl       = (uint16_t)strtoul(f15, NULL, 10);
-        uint16_t ntu       = (uint16_t)strtoul(f17, NULL, 10);
-        uint16_t cdom      = (uint16_t)strtoul(f19, NULL, 10);
-        int32_t  o2        = (int32_t)(strtof(f5, NULL) * 100);
-        int32_t  o2temp    = (int32_t)(strtof(f6, NULL) * 1000);
-
-        wifi_printf("%lu,%ld,%ld,%ld,%u,%u,%u,%ld,%ld\r\n",
-                    datetime, depth, temp, cond,
-                    chl, ntu, cdom, o2, o2temp);
-        line_count++;
-    }
-
-    filesystem_close_read();
-
-    shell_printf("[realtime] Sent %lu lines\r\n", line_count);
+    uint16_t sent = wifi_write((const uint8_t *)rt_buf, rt_len);
+    data_sent = 1;
+    shell_printf("[realtime] Sent %u/%u bytes\r\n", sent, rt_len);
 }
