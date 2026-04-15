@@ -96,10 +96,11 @@ const shell_command_t shell_commands[] = {
 
     /* WiFi Commands */
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
-    {"wifi-init", "Re-initialize WiFi module", cmd_wifi_init},
+    {"wifi-up", "Power on and initialize WiFi module", cmd_wifi_up},
+    {"wifi-down", "Power off WiFi module", cmd_wifi_down},
 
     /* Realtime Commands */
-    {"realtime", "Stream last recording over WiFi", cmd_realtime},
+    {"idata", "Stream last recording over WiFi", cmd_idata},
 
     {NULL, NULL, NULL} /* End marker */
 };
@@ -725,16 +726,22 @@ void cmd_wifi_status(int argc, char **argv)
     tasker_enqueue(handle_wifi_status, NULL, 0);
 }
 
-void cmd_wifi_init(int argc, char **argv)
+void cmd_wifi_up(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_init, NULL, 0);
+    tasker_enqueue(handle_wifi_up, NULL, 0);
 }
 
-void cmd_realtime(int argc, char **argv)
+void cmd_wifi_down(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    tasker_enqueue(handle_realtime, NULL, 0);
+    tasker_enqueue(handle_wifi_down, NULL, 0);
+}
+
+void cmd_idata(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_idata, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/

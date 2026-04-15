@@ -87,10 +87,11 @@ void cmd_config(int argc, char **argv);
 
 /* WiFi */
 void cmd_wifi_status(int argc, char **argv);
-void cmd_wifi_init(int argc, char **argv);
+void cmd_wifi_up(int argc, char **argv);
+void cmd_wifi_down(int argc, char **argv);
 
 /* Realtime */
-void cmd_realtime(int argc, char **argv);
+void cmd_idata(int argc, char **argv);
 
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);

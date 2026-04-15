@@ -36,6 +36,7 @@ typedef enum {
 
 /* Function prototypes -------------------------------------------------------*/
 void wifi_init(UART_HandleTypeDef *huart);
+void wifi_down(void);
 void wifi_service(void);
 wifi_state_t wifi_get_state(void);
 

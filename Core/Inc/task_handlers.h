@@ -81,10 +81,11 @@ void handle_config(const void *arg);
 
 /* WiFi */
 void handle_wifi_status(const void *arg);
-void handle_wifi_init(const void *arg);
+void handle_wifi_up(const void *arg);
+void handle_wifi_down(const void *arg);
 
 /* Realtime */
-void handle_realtime(const void *arg);
+void handle_idata(const void *arg);
 
 /* File System */
 void handle_fs_mount(const void *arg);

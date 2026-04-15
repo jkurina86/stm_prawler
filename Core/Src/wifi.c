@@ -22,6 +22,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 
+extern IWDG_HandleTypeDef hiwdg;
+
 /* Private defines -----------------------------------------------------------*/
 #define RX_RING_SIZE    512
 #define RESP_BUF_SIZE   512
@@ -105,9 +107,14 @@ static uint16_t wifi_read_until_prompt(char *resp_buf, uint16_t buf_size,
                                        uint32_t timeout_ms)
 {
     uint32_t start = HAL_GetTick();
+    uint32_t last_wdg = start;
     uint16_t idx = 0;
 
     while ((HAL_GetTick() - start) < timeout_ms) {
+        if ((HAL_GetTick() - last_wdg) >= 200) {
+            HAL_IWDG_Refresh(&hiwdg);
+            last_wdg = HAL_GetTick();
+        }
         uint8_t byte;
         if (rb_pop(&byte)) {
             if (idx < buf_size - 1)
@@ -128,27 +135,32 @@ static uint16_t wifi_read_until_prompt(char *resp_buf, uint16_t buf_size,
 
 /**
  * @brief  Send an AT command and read the response until "> " prompt.
+ * @return Number of response bytes received (resp_buf null-terminated).
  */
-static bool wifi_send_cmd(const char *cmd, char *resp_buf, uint16_t buf_size,
-                          uint32_t timeout_ms)
+static uint16_t wifi_send_cmd(const char *cmd, char *resp_buf, uint16_t buf_size,
+                              uint32_t timeout_ms)
 {
     rb_flush();
     wifi_send_str(cmd);
     wifi_send_str("\r");
-    wifi_read_until_prompt(resp_buf, buf_size, timeout_ms);
-    return (strstr(resp_buf, "ERROR") == NULL);
+    return wifi_read_until_prompt(resp_buf, buf_size, timeout_ms);
 }
 
 /**
- * @brief  Send command and check for success. Logs errors via shell_printf.
+ * @brief  Send command and verify the response contains "OK" followed by a
+ *         "> " prompt terminator. Logs failures via shell_printf.
  */
 static bool wifi_expect_ok(const char *cmd, const char *label,
                            uint32_t timeout_ms)
 {
     char resp[RESP_BUF_SIZE];
-    wifi_send_cmd(cmd, resp, sizeof(resp), timeout_ms);
+    uint16_t len = wifi_send_cmd(cmd, resp, sizeof(resp), timeout_ms);
 
-    if (strstr(resp, "ERROR") != NULL) {
+    bool has_prompt = (len >= 2 && resp[len - 2] == '>' && resp[len - 1] == ' ');
+    bool has_ok     = (strstr(resp, "OK") != NULL);
+    bool has_error  = (strstr(resp, "ERROR") != NULL);
+
+    if (!has_prompt || !has_ok || has_error) {
         shell_printf("[wifi] %s failed: %s\r\n", label, resp);
         return false;
     }
@@ -176,26 +188,26 @@ static void wifi_soft_reset(void)
 
 static bool wifi_setup_ap(void)
 {
-    shell_printf("[wifi] Resetting module...\r\n");
-    wifi_soft_reset();
+    //shell_printf("[wifi] Resetting module...\r\n");
+    //wifi_soft_reset();
 
     shell_printf("[wifi] Configuring Access Point...\r\n");
-    if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 5000))
+    if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 2000))
         return false;
-    if (!wifi_expect_ok("A1=" WIFI_AP_SECURITY, "Set AP Security", 5000))
+    if (!wifi_expect_ok("A1=" WIFI_AP_SECURITY, "Set AP Security",2000))
         return false;
-    if (!wifi_expect_ok("AC=" WIFI_AP_CHANNEL, "Set AP Channel", 5000))
+    if (!wifi_expect_ok("AC=" WIFI_AP_CHANNEL, "Set AP Channel", 2000))
         return false;
-    if (!wifi_expect_ok("Z6=" WIFI_AP_IP, "Set AP IP", 5000))
+    if (!wifi_expect_ok("Z6=" WIFI_AP_IP, "Set AP IP", 2000))
         return false;
-    if (!wifi_expect_ok("ZP=1,0", "Disable Power Save", 5000))
+    if (!wifi_expect_ok("ZP=1,0", "Disable Power Save", 2000))
         return false;
-    if (!wifi_expect_ok("AL=255", "Set DHCP Lease Time", 5000))
+    if (!wifi_expect_ok("AL=255", "Set DHCP Lease Time", 2000))
         return false;
 
     shell_printf("[wifi] Starting Access Point...\r\n");
     char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("AD", resp, sizeof(resp), 15000);
+    wifi_send_cmd("AD", resp, sizeof(resp), 5000);
     if (strstr(resp, "ERROR")) {
         shell_printf("[wifi] Failed to start AP: %s\r\n", resp);
         return false;
@@ -211,19 +223,19 @@ static bool wifi_setup_tcp_server(void)
     shell_printf("[wifi] Configuring TCP passthrough on port %s...\r\n",
                  WIFI_TCP_PORT);
 
-    if (!wifi_expect_ok("P2=" WIFI_TCP_PORT, "Set Local Port", 5000))
+    if (!wifi_expect_ok("P2=" WIFI_TCP_PORT, "Set Local Port", 2000))
         return false;
-    if (!wifi_expect_ok("S1=1460", "Set Write Packet Size", 5000))
+    if (!wifi_expect_ok("S1=1460", "Set Write Packet Size", 2000))
         return false;
-    if (!wifi_expect_ok("S2=50", "Set Write Timeout", 5000))
+    if (!wifi_expect_ok("S2=50", "Set Write Timeout", 2000))
         return false;
-    if (!wifi_expect_ok("PK=1,30000", "Enable TCP Keep-Alive", 5000))
+    if (!wifi_expect_ok("PK=1,30000", "Enable TCP Keep-Alive", 2000))
         return false;
 
     /* Enter streaming mode -- this is the last AT command.
        After the module responds, all UART data flows to/from TCP peer. */
     char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("PX=0,0", resp, sizeof(resp), 10000);
+    wifi_send_cmd("PX=0,0", resp, sizeof(resp), 1000);
     if (strstr(resp, "ERROR")) {
         shell_printf("[wifi] PX failed: %s\r\n", resp);
         return false;
@@ -248,10 +260,27 @@ void wifi_init(UART_HandleTypeDef *huart)
     state = WIFI_STATE_INIT;
     g_app.wifi_state = (uint8_t)state;
 
-    /* Start single-byte interrupt reception */
+    /* Arm RX interrupt BEFORE powering on the module. The boot banner
+       would otherwise overrun UART->RDR and leave the peripheral in an
+       ORE error state, silently dropping the first real AT response. */
+    __HAL_UART_CLEAR_OREFLAG(wifi_huart);
     HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
 
+    /* Power on ISM4343: drive PB9 low and give the module 3 s to boot. */
+    HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
+                      GPIO_PIN_RESET);
+    HAL_Delay(3000);
+
+    /* Discard the buffered boot banner */
+    rb_flush();
+
     shell_printf("[wifi] Initializing ISM4343 module...\r\n");
+
+    /* Sync: send a bare CR and confirm the prompt is responsive before
+       issuing real AT commands. */
+    char sync_resp[RESP_BUF_SIZE];
+    wifi_send_cmd("", sync_resp, sizeof(sync_resp), 2000);
+    rb_flush();
 
     if (!wifi_setup_ap()) {
         state = WIFI_STATE_ERROR;
@@ -269,6 +298,19 @@ void wifi_init(UART_HandleTypeDef *huart)
 wifi_state_t wifi_get_state(void)
 {
     return state;
+}
+
+void wifi_down(void)
+{
+    if (wifi_huart != NULL)
+        HAL_UART_AbortReceive_IT(wifi_huart);
+    HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
+                      GPIO_PIN_SET);
+    rb_flush();
+    wifi_cmd_pos = 0;
+    wifi_last_eol = 0;
+    state = WIFI_STATE_OFF;
+    g_app.wifi_state = (uint8_t)state;
 }
 
 /* Passthrough data API ------------------------------------------------------*/

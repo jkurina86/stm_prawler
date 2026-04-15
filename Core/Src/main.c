@@ -149,8 +149,13 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
   MX_RTC_Init();
-  MX_IWDG_Init();
+  //MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
+
+  /* Turn off wifi to bring it to a known state */
+  HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
+                    GPIO_PIN_SET);
+  HAL_Delay(5000);
 
   shell_printf("System Initialization...\r\n");
 
@@ -187,7 +192,6 @@ int main(void)
   recorder_init();
   wifi_init(&huart4);
   shell_init();
-
 
   /* USER CODE END 2 */
 
@@ -1007,6 +1011,9 @@ void transceiver_init(void) {
   /* Wetlab toggles PB4 to take a sample */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
+
+  /* Set PB11 GPIO high to enable the TRUCK_COM Transceiver */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, GPIO_PIN_SET);
 }
 
 /* USER CODE END 4 */
