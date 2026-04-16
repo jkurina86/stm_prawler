@@ -13,6 +13,7 @@
 #include "task_handlers.h"
 #include "config.h"
 #include "filesystem.h"
+#include "wifi.h"
 #include <stdarg.h>
 
 extern UART_HandleTypeDef huart1;
@@ -21,6 +22,7 @@ extern UART_HandleTypeDef huart1;
 static char shell_buffer[SHELL_MAX_CMD_LEN];
 static uint16_t shell_buffer_pos = 0;
 static uint8_t shell_rx_char;
+static bool shell_prompt_deferred;
 
 /* Non-blocking ISR to main RX ring buffer */
 #define SHELL_RX_RING_SIZE 128
@@ -101,6 +103,7 @@ const shell_command_t shell_commands[] = {
 
     /* Realtime Commands */
     {"idata", "Stream last recording over WiFi", cmd_idata},
+    {"who", "Report device serial number", cmd_who},
 
     {NULL, NULL, NULL} /* End marker */
 };
@@ -130,6 +133,12 @@ bool shell_dispatch(char *cmd_line)
         }
     }
     return false;
+}
+
+void shell_defer_prompt(void)
+{
+    shell_prompt_deferred = true;
+    wifi_defer_prompt();
 }
 
 /* Public functions ----------------------------------------------------------*/
@@ -177,7 +186,10 @@ void shell_process_char(uint8_t ch)
                 shell_buffer_pos = 0;
                 memset(shell_buffer, 0, sizeof(shell_buffer)); /* Zeros the char buffer in memory. */
             }
-            shell_print(SHELL_PROMPT);
+            if (shell_prompt_deferred)
+                shell_prompt_deferred = false;
+            else
+                shell_print(SHELL_PROMPT);
             break;
 
         /* Backspace/Delete */
@@ -741,7 +753,15 @@ void cmd_wifi_down(int argc, char **argv)
 void cmd_idata(int argc, char **argv)
 {
     (void)argc; (void)argv;
+    shell_defer_prompt();
     tasker_enqueue(handle_idata, NULL, 0);
+}
+
+void cmd_who(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    shell_defer_prompt();
+    tasker_enqueue(handle_who, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/

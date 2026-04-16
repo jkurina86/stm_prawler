@@ -80,16 +80,20 @@ void realtime_comm_stream(void)
 {
     if (wifi_get_state() != WIFI_STATE_STREAMING) {
         shell_print("[realtime] WiFi not streaming\r\n");
+        shell_print(SHELL_PROMPT);
         return;
     }
 
     if (data_sent || rt_len == 0) {
         shell_print("[realtime] No_Data\r\n");
-        wifi_printf("No_Data\r\n");
+        shell_print(SHELL_PROMPT);
+        wifi_printf("No_Data\r\n> ");
         return;
     }
 
     uint16_t sent = wifi_write((const uint8_t *)rt_buf, rt_len);
     data_sent = 1;
+    wifi_printf("> ");
     shell_printf("[realtime] Sent %u/%u bytes\r\n", sent, rt_len);
+    shell_print(SHELL_PROMPT);
 }

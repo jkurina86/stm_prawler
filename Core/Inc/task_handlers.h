@@ -86,6 +86,7 @@ void handle_wifi_down(const void *arg);
 
 /* Realtime */
 void handle_idata(const void *arg);
+void handle_who(const void *arg);
 
 /* File System */
 void handle_fs_mount(const void *arg);

@@ -664,8 +664,8 @@ void handle_wifi_status(const void *arg)
         "OFF", "INIT", "STREAMING", "ERROR"
     };
     wifi_state_t st = wifi_get_state();
-    shell_printf("WiFi state: %s (rx buf: %u bytes)\r\n",
-                 state_names[st], wifi_available());
+    shell_printf("WiFi state: %s (rx buf: %u, rx total: %lu)\r\n",
+                 state_names[st], wifi_available(), wifi_get_rx_count());
 }
 
 void handle_wifi_up(const void *arg)
@@ -689,4 +689,12 @@ void handle_idata(const void *arg)
 {
     (void)arg;
     realtime_comm_stream();
+}
+
+void handle_who(const void *arg)
+{
+    (void)arg;
+    wifi_printf("%s\r\n> ", DEVICE_SERIAL);
+    shell_printf("%s\r\n", DEVICE_SERIAL);
+    shell_print(SHELL_PROMPT);
 }

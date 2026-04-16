@@ -50,6 +50,7 @@ void shell_printf(const char *format, ...);
 void shell_task(void);
 bool shell_dispatch(char *cmd_line);
 void shell_uart_receive_callback(void);
+void shell_defer_prompt(void);
 
 /* Command functions */
 void cmd_help(int argc, char **argv);
@@ -92,6 +93,7 @@ void cmd_wifi_down(int argc, char **argv);
 
 /* Realtime */
 void cmd_idata(int argc, char **argv);
+void cmd_who(int argc, char **argv);
 
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);

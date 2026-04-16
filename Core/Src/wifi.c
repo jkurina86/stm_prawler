@@ -46,6 +46,8 @@ static wifi_state_t state = WIFI_STATE_OFF;
 static char wifi_cmd_buf[WIFI_CMD_BUF_SIZE];
 static uint16_t wifi_cmd_pos;
 static uint8_t wifi_last_eol;   /* last CR/LF byte seen, to collapse \r\n pairs */
+static volatile uint32_t wifi_rx_count; /* total bytes received via ISR (diagnostic) */
+static bool wifi_prompt_deferred;  /* when set, wifi_service skips the next "> " prompt */
 
 /* Ring buffer helpers -------------------------------------------------------*/
 
@@ -87,6 +89,7 @@ static inline void rb_flush(void)
 
 void wifi_notify_rx_cplt(void)
 {
+    wifi_rx_count++;
     rb_push(rx_byte);
     HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
 }
@@ -354,6 +357,16 @@ uint16_t wifi_available(void)
     return (h >= t) ? (h - t) : (RX_RING_SIZE - t + h);
 }
 
+uint32_t wifi_get_rx_count(void)
+{
+    return wifi_rx_count;
+}
+
+void wifi_defer_prompt(void)
+{
+    wifi_prompt_deferred = true;
+}
+
 /* Main-loop service -- WiFi shell -------------------------------------------*/
 
 /**
@@ -393,7 +406,10 @@ void wifi_service(void)
                 wifi_cmd_pos = 0;
                 memset(wifi_cmd_buf, 0, sizeof(wifi_cmd_buf));
             }
-            wifi_printf("> ");
+            if (wifi_prompt_deferred)
+                wifi_prompt_deferred = false;
+            else
+                wifi_printf("> ");
             break;
 
         case SHELL_CHAR_BS:

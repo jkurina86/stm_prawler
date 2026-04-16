@@ -29,6 +29,9 @@ extern "C" {
 #define CTD_WAKEUP_RETRIES            10  /* Max wakeup attempts */
 #define OPTODE_WAKE_DELAY_MS         500  /* Delay after first (garbled) wake */
 
+/* Device identity */
+#define DEVICE_SERIAL              "PW001"
+
 /* Buffer sizes */
 #define CTD_RX_BUF_SIZE             1024
 #define OPTODE_RX_BUF_SIZE          1024
