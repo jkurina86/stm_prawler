@@ -34,7 +34,7 @@ void realtime_comm_build(const profile_data_t *profile)
     data_sent = 0;
 
     int n = snprintf(rt_buf, RT_BUF_SIZE,
-                     "datetime,depth,temp,cond,chl,ntu,cdom,o2,o2temp\r\n");
+                     "datetime,depth,temp,cond,wl_c1,wl_c2,wl_c3,o2,o2temp\r\n");
     if (n < 0 || n >= RT_BUF_SIZE) {
         rt_len = 0;
         shell_print("[realtime] Header format failed\r\n");
@@ -50,20 +50,23 @@ void realtime_comm_build(const profile_data_t *profile)
 
         const measurement_data_t *m = &profile->measurements[i];
 
-        int16_t  depth  = (int16_t)(m->ctd.pressure      * 100.0f);
-        int16_t  temp   = (int16_t)(m->ctd.temperature   * 1000.0f);
-        int16_t  cond   = (int16_t)(m->ctd.conductivity  * 10000.0f);
-        uint16_t o2     = (uint16_t)(m->optode.o2_concentration * 100.0f);
-        uint16_t o2temp = (uint16_t)(m->optode.temperature      * 1000.0f);
+        int16_t depth = (int16_t)(m->ctd.pressure * 100.0f);
+        int16_t temp = (int16_t)(m->ctd.temperature * 1000.0f);
+        int16_t cond = (int16_t)(m->ctd.conductivity * 10000.0f);
+        uint16_t o2 = (uint16_t)(m->optode.o2_concentration * 100.0f);
+        uint16_t o2temp = (uint16_t)(m->optode.temperature * 1000.0f);
 
         int w = snprintf(rt_buf + rt_len, RT_BUF_SIZE - rt_len,
                          "%08lx,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x\r\n",
                          (unsigned long)m->timestamp,
-                         (uint16_t)depth, (uint16_t)temp, (uint16_t)cond,
-                         (uint16_t)m->wetlab.chl_signal,
-                         (uint16_t)m->wetlab.ntu_signal,
-                         (uint16_t)m->wetlab.cdom_signal,
-                         o2, o2temp);
+                         (uint16_t)depth,
+                         (uint16_t)temp,
+                         (uint16_t)cond,
+                         (uint16_t)m->wetlab.ch1_signal,
+                         (uint16_t)m->wetlab.ch2_signal,
+                         (uint16_t)m->wetlab.ch3_signal,
+                         o2,
+                         o2temp);
 
         if (w < 0 || (uint16_t)w >= RT_BUF_SIZE - rt_len) {
             shell_printf("[realtime] Row %u format truncated\r\n", i);

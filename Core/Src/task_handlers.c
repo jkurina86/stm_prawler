@@ -340,12 +340,12 @@ void handle_wetlab(const void *arg)
     wetlab_data_t data;
     if (wetlab_sample(&data)) {
         shell_print("\nWetLab:\r\n");
-        shell_printf("  CHL:        %u @ %u nm\r\n",
-                     data.chl_signal, data.chl_lambda);
-        shell_printf("  NTU:        %u @ %u nm\r\n",
-                     data.ntu_signal, data.ntu_lambda);
-        shell_printf("  CDOM:       %u @ %u nm\r\n",
-                     data.cdom_signal, data.cdom_lambda);
+        shell_printf("  CH1:        %u @ %u nm\r\n",
+                     data.ch1_signal, data.ch1_lambda);
+        shell_printf("  CH2:        %u @ %u nm\r\n",
+                     data.ch2_signal, data.ch2_lambda);
+        shell_printf("  CH3:       %u @ %u nm\r\n",
+                     data.ch3_signal, data.ch3_lambda);
         shell_printf("  Thermistor: %u\r\n", data.thermistor);
     } else {
         shell_printf("\nWetLab read failed\r\n");
@@ -394,10 +394,10 @@ void handle_sensors(const void *arg)
 
     if (has_wetlab) {
         if (reading.wetlab_ok) {
-            shell_printf("[WetLab] CHL=%u@%unm  NTU=%u@%unm  CDOM=%u@%unm  Therm=%u\r\n",
-                         reading.wetlab.chl_signal, reading.wetlab.chl_lambda,
-                         reading.wetlab.ntu_signal, reading.wetlab.ntu_lambda,
-                         reading.wetlab.cdom_signal, reading.wetlab.cdom_lambda,
+            shell_printf("[WetLab] CH1=%u@%unm  CH2=%u@%unm  CH3=%u@%unm  Therm=%u\r\n",
+                         reading.wetlab.ch1_signal, reading.wetlab.ch1_lambda,
+                         reading.wetlab.ch2_signal, reading.wetlab.ch2_lambda,
+                         reading.wetlab.ch3_signal, reading.wetlab.ch3_lambda,
                          reading.wetlab.thermistor);
         } else {
             shell_print("[WetLab] FAILED\r\n");

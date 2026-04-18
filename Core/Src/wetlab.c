@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    wetlab.c
-  * @brief   Driver for the WetLab ECO Triplet (FLBBCDPML) sensor
+  * @brief   Driver for the WetLab ECO sensor
   * @note    UART5 with DMA2 Ch2 (RX only).
   *          Sensor auto-transmits at 19200 baud on power-on (AutoRun).
   *          Power is toggled via PB4.
@@ -39,16 +39,19 @@ static void wetlab_reset_uart(void)
 static bool wetlab_arm_rx(void)
 {
     wetlab_reset_uart();
+
     __disable_irq();
-    if (HAL_UART_Receive_DMA(wetlab_huart, rx_buf,
-                              WETLAB_BUF_SIZE - 1) != HAL_OK) {
+
+    if (HAL_UART_Receive_DMA(wetlab_huart, rx_buf, WETLAB_BUF_SIZE - 1) != HAL_OK) {
         __enable_irq();
         return false;
     }
     __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_HT);
     __HAL_DMA_DISABLE_IT(wetlab_huart->hdmarx, DMA_IT_TC);
     CLEAR_BIT(wetlab_huart->Instance->CR3, USART_CR3_EIE);
+
     __enable_irq();
+
     return true;
 }
 
@@ -57,20 +60,23 @@ static bool wetlab_arm_rx(void)
  */
 static uint16_t wetlab_stop_rx(void)
 {
-    uint16_t total = (WETLAB_BUF_SIZE - 1)
-                   - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
+    uint16_t total = (WETLAB_BUF_SIZE - 1) - __HAL_DMA_GET_COUNTER(wetlab_huart->hdmarx);
     HAL_UART_AbortReceive(wetlab_huart);
-    if (total < WETLAB_BUF_SIZE)
+
+    if (total < WETLAB_BUF_SIZE) {
         rx_buf[total] = '\0';
-    /* Remove any embedded NULs (from power-on transient)
-     * by shifting the remaining data left */
+    }
+
+    /* Remove any NULs from power-on transient by shifting the remaining data left */
     uint16_t dst = 0;
     for (uint16_t src = 0; src < total; src++) {
         if (rx_buf[src] != '\0')
             rx_buf[dst++] = rx_buf[src];
     }
+
     total = dst;
     rx_buf[total] = '\0';
+
     return total;
 }
 
@@ -82,23 +88,23 @@ static uint16_t wetlab_stop_rx(void)
 static bool wetlab_parse(const char *line, wetlab_data_t *out)
 {
     unsigned m, d, y, hh, mm, ss;
-    unsigned cl, cs, nl, ns, dl, ds, th;
+    unsigned ch1_lambda, ch1_signal, ch2_lambda, ch2_signal, ch3_lambda, ch3_signal, therm;
     if (sscanf(line, "%u/%u/%u %u:%u:%u %u %u %u %u %u %u %u",
                &m, &d, &y, &hh, &mm, &ss,
-               &cl, &cs, &nl, &ns, &dl, &ds, &th) != 13) {
+               &ch1_lambda, &ch1_signal, &ch2_lambda, &ch2_signal, &ch3_lambda, &ch3_signal, &therm) != 13) {
         return false;
     }
     /* Validate signal counts are within classic mode range (0–4130) */
-    if (cs > 4130 || ns > 4130 || ds > 4130)
+    if (ch1_signal > 4130 || ch2_signal > 4130 || ch3_signal > 4130)
         return false;
 
-    out->chl_lambda   = (uint16_t)cl;
-    out->chl_signal   = (uint16_t)cs;
-    out->ntu_lambda   = (uint16_t)nl;
-    out->ntu_signal   = (uint16_t)ns;
-    out->cdom_lambda  = (uint16_t)dl;
-    out->cdom_signal  = (uint16_t)ds;
-    out->thermistor   = (uint16_t)th;
+    out->ch1_lambda   = (uint16_t)ch1_lambda;
+    out->ch1_signal   = (uint16_t)ch1_signal;
+    out->ch2_lambda   = (uint16_t)ch2_lambda;
+    out->ch2_signal   = (uint16_t)ch2_signal;
+    out->ch3_lambda   = (uint16_t)ch3_lambda;
+    out->ch3_signal   = (uint16_t)ch3_signal;
+    out->thermistor   = (uint16_t)therm;
     return true;
 }
 
@@ -115,13 +121,13 @@ static char *wetlab_find_last_row(void)
         while (*p == '\r' || *p == '\n') {
             p++;
         }
-        
+
         if (!*p) {
             break;
         }
-        
+
         char *eol = p;
-        
+
         while (*eol && *eol != '\r' && *eol != '\n') {
             eol++;
         }
@@ -129,9 +135,9 @@ static char *wetlab_find_last_row(void)
         if (!*eol) {
             break;  /* incomplete line at end of buffer — skip */
         }
-        
+
         *eol = '\0';
-        
+
         if (*p >= '0' && *p <= '9') {
             last = p;
         }

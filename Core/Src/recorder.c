@@ -17,8 +17,11 @@
 #include "sensors.h"
 #include "profile_data.h"
 #include "realtime_comm.h"
+#include "wifi.h"
 #include "stm32l4xx_hal.h"
 #include "config.h"
+
+extern UART_HandleTypeDef huart4;
 #include <string.h>
 #include <stdio.h>
 
@@ -96,25 +99,28 @@ static void return_to_idle(void)
     g_app.mode = SYS_MODE_IDLE;
     start_time = 0;
     debounce_active = false;
+
+    /* Restore WiFi that was brought down when the profile started. */
+    wifi_init(&huart4);
 }
 
 static int format_measurement_csv(char *buf, size_t buf_size,
                                   const measurement_data_t *m,
-                                  uint32_t profile_no)
+                                  uint32_t measurement_num)
 {
     return snprintf(buf, buf_size,
         "%lu,%lu,%f,%f,%f,"
         "%f,%f,%f,%f,%f,%f,%f,%f,%f,"
         "%u,%u,%u,%u,%u,%u,%u\r\n",
-        profile_no, (unsigned long)m->timestamp,
+        measurement_num, (unsigned long)m->timestamp,
         m->ctd.conductivity, m->ctd.temperature, m->ctd.pressure,
         m->optode.o2_concentration, m->optode.temperature,
         m->optode.cal_phase, m->optode.tc_phase,
         m->optode.c1_rph, m->optode.c2_rph,
         m->optode.c1_amp, m->optode.c2_amp, m->optode.raw_temp,
-        m->wetlab.chl_lambda, m->wetlab.chl_signal,
-        m->wetlab.ntu_lambda, m->wetlab.ntu_signal,
-        m->wetlab.cdom_lambda, m->wetlab.cdom_signal,
+        m->wetlab.ch1_lambda, m->wetlab.ch1_signal,
+        m->wetlab.ch2_lambda, m->wetlab.ch2_signal,
+        m->wetlab.ch3_lambda, m->wetlab.ch3_signal,
         m->wetlab.thermistor);
 }
 
@@ -131,7 +137,7 @@ static bool build_filename(uint32_t start_epoch, char *out, size_t out_size)
 }
 
 /**
- * @brief  Flush the accumulated profile buffer to a single CSV file on SD.
+ * @brief  Flush the profile buffer to a single CSV file on SD.
  *         Assumes the SD is already powered on and mounted.
  */
 static bool flush_profile_to_sd(void)
@@ -148,7 +154,7 @@ static bool flush_profile_to_sd(void)
     }
 
     static const char hdr[] =
-        "ProfileNo,Unix_Epoch_UTC,CTD_C,CTD_T,CTD_D,"
+        "MeasurementNo,Unix_Epoch_UTC,CTD_C,CTD_T,CTD_D,"
         "Optode_O2,Optode_Temp,Optode_Cal_Ph,Optode_Tc_Ph,"
         "Optode_C1_Ph,Optode_C2_Ph,Optode_C1_Amp,Optode_C2_Amp,Optode_Temp_raw,"
         "Wetlab_C1_lambda,Wetlab_C1_signal,Wetlab_C2_lambda,Wetlab_C2_signal,"
@@ -272,9 +278,11 @@ void recorder_service(void)
                 break;
             debounce_active = false;
 
-            /* Start a new profile: reset buffer, capture start time, power SD off. */
+            /* Start a new profile: reset buffer, capture start time, bring
+             * WiFi down, power SD off. WiFi is restored in return_to_idle(). */
             g_profile.count = 0;
             g_profile.start_epoch = get_unix_timestamp();
+            wifi_down();
             sd_power_off();
 
             shell_printf("[recorder] Started (SD powered off, buffering in RAM)\r\n");
