@@ -142,7 +142,12 @@ void realtime_comm_stream(void)
         return;
     }
 
-    uint16_t sent = wifi_write((const uint8_t *)rt_buf, rt_len);
+    uint16_t sent = 0;
+
+    sent += wifi_write((const uint8_t *)rt_buf, RT_FRAME_OVERHEAD);
+    sent += wifi_write((const uint8_t *)&rt_buf[RT_FRAME_OVERHEAD],
+                       (uint16_t)(rt_len - RT_FRAME_OVERHEAD));
+
     data_sent = 1;
     shell_printf("[realtime] Sent %u/%u bytes\r\n", sent, rt_len);
     shell_print(SHELL_PROMPT);

@@ -287,10 +287,10 @@ void recorder_service(void)
 
             shell_printf("[recorder] Started (SD powered off, buffering in RAM)\r\n");
 
-            /* Take first sample immediately; schedule next one an interval
-             * after the sample completes (matches original cadence). */
-            next_sample_tick = 0;
-            record_sample(0);
+            /* Take an immediate probe sample for false-start detection only.
+             * Do not append it to g_profile; the first recorded sample is the
+             * first scheduled SAMPLE_INTERVAL measurement. */
+            sensors_sample(&reading);
             next_sample_tick = HAL_GetTick() + SAMPLE_INTERVAL;
             sample_count = 0;
             start_time = HAL_GetTick();
