@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    wifi.c
   * @brief   ISM4343-WBM-L54 WiFi module driver (AP mode, TCP passthrough)
-  * @note    UART4 at 115200 baud, interrupt-driven RX with ring buffer.
+  * @note    UART4 at 9600 baud, interrupt-driven RX with ring buffer.
   *
   *          Boot sequence uses AT commands to configure AP and TCP server,
   *          then issues PX=0,0 to enter streaming mode.  After that, all

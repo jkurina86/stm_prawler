@@ -11,9 +11,9 @@ Scaling factors (from realtime_comm.c):
     depth     int16   pressure * 100       -> dbar
     temp      int16   temperature * 1000   -> deg C
     cond      int16   conductivity * 10000 -> S/m
-    chl       uint16  raw signal           -> counts
-    ntu       uint16  raw signal           -> counts
-    cdom      uint16  raw signal           -> counts
+    wl_c1     uint16  raw signal           -> counts
+    wl_c2     uint16  raw signal           -> counts
+    wl_c3     uint16  raw signal           -> counts
     o2        uint16  O2_conc * 100        -> umol/L
     o2temp    uint16  optode_temp * 1000   -> deg C
 """
@@ -36,29 +36,67 @@ def hex_to_uint16(h: str) -> int:
     return int(h, 16)
 
 
-def decode_row(row: list[str]) -> dict:
-    ts = int(row[0], 16)
-    depth_raw = hex_to_int16(row[1])
-    temp_raw = hex_to_int16(row[2])
-    cond_raw = hex_to_int16(row[3])
-    chl = hex_to_uint16(row[4])
-    ntu = hex_to_uint16(row[5])
-    cdom = hex_to_uint16(row[6])
-    o2_raw = hex_to_uint16(row[7])
-    o2temp_raw = hex_to_uint16(row[8])
+LEGACY_SHORT_HEADER = ["ep", "cd", "ct", "cc", "ot", "o2", "ch", "tb", "cd"]
+LEGACY_SHORT_COLUMNS = [
+    "datetime", "depth", "temp", "cond", "o2temp", "o2", "wl_c1", "wl_c2", "wl_c3"
+]
 
-    return {
-        "Unix_Epoch_UTC": ts,
-        "DateTime_UTC": datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        "Depth_dbar": depth_raw / 100.0,
-        "Temp_degC": temp_raw / 1000.0,
-        "Cond_S_m": cond_raw / 10000.0,
-        "Chl_counts": chl,
-        "NTU_counts": ntu,
-        "CDOM_counts": cdom,
-        "O2_umol_L": o2_raw / 100.0,
-        "O2Temp_degC": o2temp_raw / 1000.0,
-    }
+OUTPUT_FIELDS = [
+    "Unix_Epoch_UTC", "DateTime_UTC",
+    "Depth_dbar", "Temp_degC", "Cond_S_m",
+    "Chl_counts", "NTU_counts", "CDOM_counts",
+    "O2_umol_L", "O2Temp_degC",
+]
+
+INPUT_ALIASES = {
+    "datetime": "datetime",
+    "depth": "depth",
+    "temp": "temp",
+    "cond": "cond",
+    "chl": "wl_c1",
+    "wl_c1": "wl_c1",
+    "ntu": "wl_c2",
+    "wl_c2": "wl_c2",
+    "cdom": "wl_c3",
+    "wl_c3": "wl_c3",
+    "o2": "o2",
+    "o2temp": "o2temp",
+}
+
+
+def normalize_header(header: list[str]) -> list[str]:
+    cols = [col.strip().lower() for col in header]
+    if cols == LEGACY_SHORT_HEADER:
+        return LEGACY_SHORT_COLUMNS
+    return [INPUT_ALIASES.get(col, col) for col in cols]
+
+
+def decode_row(row: list[str], header: list[str]) -> dict:
+    decoded = {field: "" for field in OUTPUT_FIELDS}
+
+    for column, value in zip(header, row):
+        if column == "datetime":
+            ts = int(value, 16)
+            decoded["Unix_Epoch_UTC"] = ts
+            decoded["DateTime_UTC"] = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        elif column == "depth":
+            decoded["Depth_dbar"] = hex_to_int16(value) / 100.0
+        elif column == "temp":
+            decoded["Temp_degC"] = hex_to_int16(value) / 1000.0
+        elif column == "cond":
+            decoded["Cond_S_m"] = hex_to_int16(value) / 10000.0
+        elif column == "wl_c1":
+            decoded["Chl_counts"] = hex_to_uint16(value)
+        elif column == "wl_c2":
+            decoded["NTU_counts"] = hex_to_uint16(value)
+        elif column == "wl_c3":
+            decoded["CDOM_counts"] = hex_to_uint16(value)
+        elif column == "o2":
+            decoded["O2_umol_L"] = hex_to_uint16(value) / 100.0
+        elif column == "o2temp":
+            decoded["O2Temp_degC"] = hex_to_uint16(value) / 1000.0
+
+    return decoded
 
 
 def main():
@@ -80,31 +118,24 @@ def main():
     else:
         output_path = input_path.parent / "RECORDS.csv"
 
-    fieldnames = [
-        "Unix_Epoch_UTC", "DateTime_UTC",
-        "Depth_dbar", "Temp_degC", "Cond_S_m",
-        "Chl_counts", "NTU_counts", "CDOM_counts",
-        "O2_umol_L", "O2Temp_degC",
-    ]
-
     rows_decoded = 0
     with open(input_path, newline="") as fin, \
          open(output_path, "w", newline="") as fout:
         reader = csv.reader(fin)
-        header = next(reader)
-        if header[0].strip().lower() != "datetime":
+        header = normalize_header(next(reader))
+        if "datetime" not in header:
             print(f"Warning: unexpected header: {header}", file=sys.stderr)
 
-        writer = csv.DictWriter(fout, fieldnames=fieldnames)
+        writer = csv.DictWriter(fout, fieldnames=OUTPUT_FIELDS)
         writer.writeheader()
 
         for lineno, row in enumerate(reader, start=2):
-            if len(row) < 9:
+            if len(row) < len(header):
                 print(f"Warning: skipping short row at line {lineno}: {row}",
                       file=sys.stderr)
                 continue
             try:
-                decoded = decode_row(row)
+                decoded = decode_row(row, header)
                 writer.writerow(decoded)
                 rows_decoded += 1
             except (ValueError, IndexError) as e:

@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    wifi.h
   * @brief   ISM4343-WBM-L54 WiFi module driver (AP mode, TCP passthrough)
-  * @note    UART4 at 115200 baud, interrupt-driven RX ring buffer.
+  * @note    UART4 at 9600 baud, interrupt-driven RX ring buffer.
   *          After boot, enters PX streaming mode -- UART becomes a
   *          transparent byte pipe to/from the connected TCP client.
   ******************************************************************************

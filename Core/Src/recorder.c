@@ -245,6 +245,7 @@ void recorder_init(void)
 {
     state = REC_IDLE;
     g_profile.count = 0;
+    g_profile.sensor_level = SENSOR_CFG_ALL;
     g_profile.start_epoch = 0;
 
     /* Seed last filename from SD card if a recording exists */
@@ -281,6 +282,7 @@ void recorder_service(void)
             /* Start a new profile: reset buffer, capture start time, bring
              * WiFi down, power SD off. WiFi is restored in return_to_idle(). */
             g_profile.count = 0;
+            g_profile.sensor_level = g_app.sensor_level;
             g_profile.start_epoch = get_unix_timestamp();
             wifi_down();
             sd_power_off();

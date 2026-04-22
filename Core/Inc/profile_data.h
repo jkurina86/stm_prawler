@@ -37,6 +37,7 @@ typedef struct {
 
 typedef struct {
     uint16_t            count;
+    uint8_t             sensor_level;                         /* SENSOR_CFG_* used for this profile */
     uint32_t            start_epoch;                          /* Unix epoch at PB8 trigger */
     measurement_data_t  measurements[PROFILE_MAX_MEASUREMENTS];
 } profile_data_t;

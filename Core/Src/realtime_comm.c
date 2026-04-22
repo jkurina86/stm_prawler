@@ -3,9 +3,8 @@
   * @file    realtime_comm.c
   * @brief   Realtime hex-encoded CSV streaming over WiFi.
  * @note    After each profile finishes normalizing, realtime_comm_build()
- *          formats the CSV payload into rt_buf (placed in SRAM2 via the
- *          .ram2_bss linker section) and caches its CRC/length metadata.
- *          realtime_comm_stream() sends the preamble first, then the CSV.
+ *          formats the CSV payload into rt_buf and caches its CRC/length.
+ *          realtime_comm_stream() sends the preamble, newline, then the CSV.
   ******************************************************************************
   */
 
@@ -16,9 +15,8 @@
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define RT_BUF_SIZE          18432   /* 18 KB: fits worst-case 346 rows + frame */
+#define RT_BUF_SIZE          12288   /* 12 KB: fits worst-case variable-width realtime CSV */
 #define RT_LEN_ASCII_LEN     4U
-#define RT_ROW_RESERVE       64U     /* defensive min free bytes before appending a row */
 
 /* Private variables ---------------------------------------------------------*/
 static char rt_buf[RT_BUF_SIZE] __attribute__((section(".ram2_bss")));
@@ -70,13 +68,42 @@ void realtime_comm_build(const profile_data_t *profile)
     uint32_t crc_accum = 0;
     uint16_t csv_len;
     uint16_t rows_built = 0;
+    bool has_optode = false;
+    bool has_wetlab = false;
+
+    switch (profile->sensor_level) {
+    case SENSOR_CFG_CTD_ONLY:
+        break;
+    case SENSOR_CFG_CTD_OPTODE:
+        has_optode = true;
+        break;
+    case SENSOR_CFG_ALL:
+    default:
+        has_optode = true;
+        has_wetlab = true;
+        break;
+    }
 
     rt_len = 0;
     rt_crc = 0;
     data_sent = 0;
 
-    /* Create the header */
-    int n = snprintf(csv_buf, csv_capacity, "EP,CD,CT,CC,OT,O2,CH,TB,CD\n");
+    /* Create the header based on sensor configuration */
+    int n;
+    if (has_wetlab && has_optode) {
+        n = snprintf(csv_buf, csv_capacity,
+                     "EP,CD,CT,CC,OT,O2,CH,TB,CD\n");
+    } else if (!has_wetlab && has_optode) {
+        n = snprintf(csv_buf, csv_capacity,
+                     "EP,CD,CT,CC,O2\n");
+    } else {
+        n = snprintf(csv_buf, csv_capacity,
+                     "EP,CD,CT,CC\n");
+    }
+
+    if (n < 0 || (size_t)n >= csv_capacity) {
+        return;
+    }
 
     /* Initialize the CSV length */
     csv_len = (uint16_t)n;
@@ -92,8 +119,10 @@ void realtime_comm_build(const profile_data_t *profile)
         uint16_t o2 = (uint16_t)(m->optode.o2_concentration * 100.0f);
         uint16_t o2temp = (uint16_t)(m->optode.temperature * 1000.0f);
 
-        /* Build the new CSV row */
-        int w = snprintf(csv_buf + csv_len, csv_capacity - csv_len,
+        /* Build the new CSV row based on sensor configuration */
+        int w;
+        if (has_wetlab) {
+            w = snprintf(csv_buf + csv_len, csv_capacity - csv_len,
                          "%08lx,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x\n",
                          (unsigned long)m->timestamp,
                          (uint16_t)depth,
@@ -103,8 +132,28 @@ void realtime_comm_build(const profile_data_t *profile)
                          o2,
                          (uint16_t)m->wetlab.ch1_signal,
                          (uint16_t)m->wetlab.ch2_signal,
-                         (uint16_t)m->wetlab.ch3_signal
-        );
+                         (uint16_t)m->wetlab.ch3_signal);
+        } else if (has_optode) {
+            w = snprintf(csv_buf + csv_len, csv_capacity - csv_len,
+                         "%08lx,%04x,%04x,%04x,%04x,%04x\n",
+                         (unsigned long)m->timestamp,
+                         (uint16_t)depth,
+                         (uint16_t)temp,
+                         (uint16_t)cond,
+                         o2temp,
+                         o2);
+        } else {
+            w = snprintf(csv_buf + csv_len, csv_capacity - csv_len,
+                         "%08lx,%04x,%04x,%04x\n",
+                         (unsigned long)m->timestamp,
+                         (uint16_t)depth,
+                         (uint16_t)temp,
+                         (uint16_t)cond);
+        }
+
+        if (w < 0 || (size_t)w >= (csv_capacity - csv_len)) {
+            break;
+        }
 
         /* Update CSV length */
         csv_len += (uint16_t)w;
@@ -125,16 +174,20 @@ void realtime_comm_build(const profile_data_t *profile)
 
     /* Update the length of the realtime data transfer */
     rt_len = csv_len;
+
+    shell_printf("[realtime] Built %u rows (%u-byte CSV)\r\n", rows_built, rt_len);
 }
 
 void realtime_comm_stream(void)
 {
+    /* Guard to ensure WiFi is in passthrough mode */
     if (wifi_get_state() != WIFI_STATE_STREAMING) {
         shell_print("[realtime] WiFi not streaming\r\n");
         shell_print(SHELL_PROMPT);
         return;
     }
 
+    /* No_Data case */
     if (data_sent || rt_len == 0) {
         shell_print("[realtime] No_Data\r\n");
         wifi_printf("No_Data\r\n> ");
