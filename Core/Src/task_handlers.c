@@ -17,6 +17,7 @@
 #include "config.h"
 #include "wifi.h"
 #include "realtime_comm.h"
+#include "lowpower.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -76,6 +77,19 @@ void handle_status(const void *arg)
     shell_printf("WetLab:     %s\r\n", periph_names[g_app.wetlab_status]);
     shell_printf("WiFi:       %s\r\n", wifi_names[g_app.wifi_state]);
     shell_printf("Sensors:    level %u\r\n", g_app.sensor_level);
+}
+
+void handle_low_power_on(const void *arg)
+{
+    (void)arg;
+
+    if (!lowpower_request_on()) {
+        shell_print("[lowpower] Sleep request already pending\r\n");
+        shell_print(SHELL_PROMPT);
+        return;
+    }
+
+    shell_print("[lowpower] Sleep requested\r\n");
 }
 
 /** @brief  Handle the "reset" command

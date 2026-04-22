@@ -50,6 +50,7 @@ typedef struct {
 void handle_help(const void *arg);
 void handle_clear(const void *arg);
 void handle_status(const void *arg);
+void handle_low_power_on(const void *arg);
 void handle_reset(const void *arg);
 void handle_version(const void *arg);
 /* RTC */

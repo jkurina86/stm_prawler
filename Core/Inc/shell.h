@@ -51,11 +51,13 @@ void shell_task(void);
 bool shell_dispatch(char *cmd_line);
 void shell_uart_receive_callback(void);
 void shell_defer_prompt(void);
+void shell_resume_rx(void);
 
 /* Command functions */
 void cmd_help(int argc, char **argv);
 void cmd_clear(int argc, char **argv);
 void cmd_status(int argc, char **argv);
+void cmd_low_power_on(int argc, char **argv);
 void cmd_pb8(int argc, char **argv);
 void cmd_reset(int argc, char **argv);
 void cmd_version(int argc, char **argv);

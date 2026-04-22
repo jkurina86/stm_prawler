@@ -19,12 +19,15 @@
 
 /* Private variables ---------------------------------------------------------*/
 extern SPI_HandleTypeDef hspi2;
+static volatile bool g_rtc_interrupt_pending;
 
 /* Private function prototypes -----------------------------------------------*/
 static RTC_Status_t RTC_SPITransmit(uint8_t* data, uint16_t size);
 static RTC_Status_t RTC_SPITransmitReceive(uint8_t* tx_data, uint8_t* rx_data, uint16_t size);
 
 static RTC_Status_t RTC_WaitForEEPROMReady(uint32_t timeout_ms);
+static RTC_Status_t RTC_ClearRegisterBits(uint8_t reg, uint8_t clear_mask);
+static uint8_t RTC_InterruptMaskToStatusMask(uint8_t interrupt_mask);
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -77,6 +80,33 @@ static RTC_Status_t RTC_WaitForEEPROMReady(uint32_t timeout_ms) {
     }
 }
 
+static RTC_Status_t RTC_ClearRegisterBits(uint8_t reg, uint8_t clear_mask) {
+    uint8_t value;
+    RTC_Status_t status = RTC_ReadRegister(reg, &value);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    value &= (uint8_t)~clear_mask;
+    return RTC_WriteRegister(reg, value);
+}
+
+static uint8_t RTC_InterruptMaskToStatusMask(uint8_t interrupt_mask) {
+    uint8_t status_mask = 0;
+
+    if ((interrupt_mask & RTC_INTERRUPT_VLOW1) != 0u) {
+        status_mask |= RTC_CTRL_STATUS_V1F;
+    }
+    if ((interrupt_mask & RTC_INTERRUPT_VLOW2) != 0u) {
+        status_mask |= RTC_CTRL_STATUS_V2F;
+    }
+    if ((interrupt_mask & RTC_INTERRUPT_SELF_RECOVERY) != 0u) {
+        status_mask |= RTC_CTRL_STATUS_SR;
+    }
+
+    return status_mask;
+}
+
 /* Public functions ----------------------------------------------------------*/
 
 /**
@@ -84,6 +114,8 @@ static RTC_Status_t RTC_WaitForEEPROMReady(uint32_t timeout_ms) {
   * @retval RTC status
   */
 RTC_Status_t RTC_Init(void) {
+    g_rtc_interrupt_pending = false;
+
     /* Ensure CS pin is Low */
     RTC_CS_DESELECT();
     
@@ -151,6 +183,8 @@ RTC_Status_t RTC_DeInit(void) {
 
     /* Disable alarms */
     RTC_EnableAlarm(false);
+
+    g_rtc_interrupt_pending = false;
 
     /* Deselect CS pin */
     RTC_CS_DESELECT();
@@ -391,22 +425,11 @@ RTC_Status_t RTC_GetAlarm(RTC_Alarm_t* alarm) {
   * @retval RTC status
   */
 RTC_Status_t RTC_EnableAlarm(bool enable) {
-    uint8_t ctrl_int;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
-        return RTC_ERROR;
-    }
-    
-    /* Configure alarm interrupt enable bit */
     if (enable) {
-        /* Set the Alarm Interrupt Enable (AIE) bit */
-        ctrl_int |= RTC_CTRL_INT_AIE;
-    } else {
-        /* Clear the Alarm Interrupt Enable (AIE) bit */
-        ctrl_int &= (~RTC_CTRL_INT_AIE);
+        return RTC_EnableInterrupt(RTC_INTERRUPT_ALARM);
     }
-    
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+
+    return RTC_DisableInterrupt(RTC_INTERRUPT_ALARM);
 }
 
 /**
@@ -414,16 +437,12 @@ RTC_Status_t RTC_EnableAlarm(bool enable) {
   * @retval true if alarm flag is set, false otherwise
   */
 bool RTC_IsAlarmTriggered(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) == RTC_OK) {
-        if (ctrl_int_flag & RTC_CTRL_INT_FLAG_AF) {
-            return true;
-        } else {
-            return false;
-        }
+    uint8_t flags;
+
+    if (RTC_GetInterruptFlags(&flags) == RTC_OK) {
+        return (flags & RTC_INTERRUPT_ALARM) != 0u;
     }
-    
+
     return false;
 }
 
@@ -432,17 +451,91 @@ bool RTC_IsAlarmTriggered(void) {
   * @retval true if timer flag is set, false otherwise
   */
 bool RTC_IsTimerTriggered(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) == RTC_OK) {
-        if (ctrl_int_flag & RTC_CTRL_INT_FLAG_TF) {
-            return true;
-        } else {
-            return false;
+    uint8_t flags;
+
+    if (RTC_GetInterruptFlags(&flags) == RTC_OK) {
+        return (flags & RTC_INTERRUPT_TIMER) != 0u;
+    }
+
+    return false;
+}
+
+RTC_Status_t RTC_GetInterruptFlags(uint8_t *flags) {
+    RTC_Status_t status;
+
+    if (flags == NULL) {
+        return RTC_INVALID_PARAM;
+    }
+
+    status = RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, flags);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    *flags &= RTC_INTERRUPT_MASK_ALL;
+    return RTC_OK;
+}
+
+RTC_Status_t RTC_GetStatusFlags(uint8_t *status) {
+    if (status == NULL) {
+        return RTC_INVALID_PARAM;
+    }
+
+    return RTC_ReadRegister(RTC_REG_CONTROL_STATUS, status);
+}
+
+RTC_Status_t RTC_GetInterruptState(RTC_InterruptState_t *state) {
+    RTC_Status_t status;
+
+    if (state == NULL) {
+        return RTC_INVALID_PARAM;
+    }
+
+    status = RTC_ReadRegister(RTC_REG_CONTROL_INT, &state->enabled_mask);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_GetInterruptFlags(&state->flag_mask);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_GetStatusFlags(&state->status_flags);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    state->enabled_mask &= RTC_INTERRUPT_MASK_ALL;
+    return RTC_OK;
+}
+
+RTC_Status_t RTC_ClearInterruptSources(uint8_t interrupt_mask) {
+    RTC_Status_t status;
+    uint8_t status_mask;
+
+    if ((interrupt_mask & ~RTC_INTERRUPT_MASK_ALL) != 0u) {
+        return RTC_INVALID_PARAM;
+    }
+
+    if (interrupt_mask == 0u) {
+        return RTC_OK;
+    }
+
+    status = RTC_ClearRegisterBits(RTC_REG_CONTROL_INT_FLAG, interrupt_mask);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status_mask = RTC_InterruptMaskToStatusMask(interrupt_mask);
+    if (status_mask != 0u) {
+        status = RTC_ClearRegisterBits(RTC_REG_CONTROL_STATUS, status_mask);
+        if (status != RTC_OK) {
+            return status;
         }
     }
-    
-    return false;
+
+    return RTC_OK;
 }
 
 /**
@@ -450,15 +543,7 @@ bool RTC_IsTimerTriggered(void) {
   * @retval RTC status
   */
 RTC_Status_t RTC_ClearAlarmFlag(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) != RTC_OK) {
-        return RTC_ERROR;
-    }
-
-    ctrl_int_flag &= ~RTC_CTRL_INT_FLAG_AF;  /* Clear alarm flag */
-
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT_FLAG, ctrl_int_flag);
+    return RTC_ClearInterruptSources(RTC_INTERRUPT_ALARM);
 }
 
 /**
@@ -466,15 +551,7 @@ RTC_Status_t RTC_ClearAlarmFlag(void) {
   * @retval RTC status
   */
 RTC_Status_t RTC_ClearTimerFlag(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) != RTC_OK) {
-        return RTC_ERROR;
-    }
-
-    ctrl_int_flag &= ~RTC_CTRL_INT_FLAG_TF;  /* Clear timer flag */
-
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT_FLAG, ctrl_int_flag);
+    return RTC_ClearInterruptSources(RTC_INTERRUPT_TIMER);
 }
 
 /**
@@ -482,10 +559,64 @@ RTC_Status_t RTC_ClearTimerFlag(void) {
   * @retval RTC status
   */
 RTC_Status_t RTC_ClearAllFlags(void) {
-    /* Clear all interrupt flags */
-    RTC_Status_t status = RTC_WriteRegister(RTC_REG_CONTROL_INT_FLAG, 0x00);
-    
+    RTC_Status_t status = RTC_ClearInterruptSources(RTC_INTERRUPT_MASK_ALL);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_ClearRegisterBits(RTC_REG_CONTROL_STATUS, RTC_CTRL_STATUS_PON);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    g_rtc_interrupt_pending = false;
     return status;
+}
+
+RTC_Status_t RTC_EnableInterrupt(uint8_t interrupt_mask) {
+    uint8_t ctrl_int;
+
+    if ((interrupt_mask & ~RTC_INTERRUPT_MASK_ALL) != 0u) {
+        return RTC_INVALID_PARAM;
+    }
+
+    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
+        return RTC_ERROR;
+    }
+
+    ctrl_int |= interrupt_mask;
+    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+}
+
+RTC_Status_t RTC_DisableInterrupt(uint8_t interrupt_mask) {
+    uint8_t ctrl_int;
+
+    if ((interrupt_mask & ~RTC_INTERRUPT_MASK_ALL) != 0u) {
+        return RTC_INVALID_PARAM;
+    }
+
+    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
+        return RTC_ERROR;
+    }
+
+    ctrl_int &= (uint8_t)~interrupt_mask;
+    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+}
+
+void RTC_NotifyInterrupt(void) {
+    g_rtc_interrupt_pending = true;
+}
+
+bool RTC_IsInterruptPending(void) {
+    return g_rtc_interrupt_pending;
+}
+
+void RTC_ClearPendingInterrupt(void) {
+    g_rtc_interrupt_pending = false;
+}
+
+bool RTC_IsInterruptAsserted(void) {
+    return HAL_GPIO_ReadPin(RTC_INT_PORT, RTC_INT_PIN) == GPIO_PIN_RESET;
 }
 
 /**
@@ -730,19 +861,11 @@ RTC_Status_t RTC_SetTimerDivision(uint8_t division) {
   * @retval RTC status
   */
 RTC_Status_t RTC_EnableTimerInterrupt(bool enable) {
-    uint8_t ctrl_int;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
-        return RTC_ERROR;
-    }
-    
     if (enable) {
-        ctrl_int |= RTC_CTRL_INT_TIE;
-    } else {
-        ctrl_int &= ~RTC_CTRL_INT_TIE;
+        return RTC_EnableInterrupt(RTC_INTERRUPT_TIMER);
     }
-    
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+
+    return RTC_DisableInterrupt(RTC_INTERRUPT_TIMER);
 }
 
 /**

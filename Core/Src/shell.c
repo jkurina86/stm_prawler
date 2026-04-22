@@ -53,6 +53,7 @@ const shell_command_t shell_commands[] = {
     {"help", "Display available commands", cmd_help},
     {"clear", "Clear terminal screen", cmd_clear},
     {"status", "Show system status", cmd_status},
+    {"low-power-on", "Enter low-power sleep mode", cmd_low_power_on},
     {"pb8", "Show PB8 pin state", cmd_pb8},
     {"reset", "Reset the system", cmd_reset},
     {"version", "Show firmware version", cmd_version},
@@ -141,6 +142,14 @@ void shell_defer_prompt(void)
     wifi_defer_prompt();
 }
 
+void shell_resume_rx(void)
+{
+    __HAL_UART_CLEAR_OREFLAG(&huart1);
+    __HAL_UART_CLEAR_NEFLAG(&huart1);
+    __HAL_UART_CLEAR_FEFLAG(&huart1);
+    HAL_UART_Receive_IT(&huart1, &shell_rx_char, 1);
+}
+
 /* Public functions ----------------------------------------------------------*/
 
 /**
@@ -156,7 +165,7 @@ void shell_init(void)
     shell_buffer_pos = 0;
 
     /* Start UART reception in interrupt-mode (HAL) */
-    HAL_UART_Receive_IT(&huart1, &shell_rx_char, 1);
+    shell_resume_rx();
 
     /* Print welcome message */
     shell_print("\n===============================================\n");
@@ -346,6 +355,17 @@ void cmd_status(int argc, char **argv)
 {
     (void)argc; (void)argv; /* Unused args */
     tasker_enqueue(handle_status, NULL, 0);
+}
+
+void cmd_low_power_on(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_low_power_on, NULL, 0)) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
 }
 
 void cmd_pb8(int argc, char **argv)

@@ -1,0 +1,65 @@
+Pin, label, what it connects to
+1, VBAT, 3V3 power
+2, PC13, No connection
+3, PC14, 32k low-speed crystal
+4, PC15, 32k low-speed crystal
+5, PH0, 8MHz high-speed crystal
+6, PH1, 8MHz high-speed crystal
+7, NRST, Reset line
+8, PC0, No connection
+9, PC1, No connection
+10, PC2, No connection
+11, PC3, No connection
+12, VSSA, 
+13, VDDA,
+14, PA0, UART4_TX - MAX3226EETE pin 8
+15, PA1, UART4_RX - MAX3226EETE pin 6
+16, PA2, USART2_TX - MAX3226EETE pin 8
+17, PA3, USART2_RX - MAX3226EETE pin 6
+18, VSS,
+19, VDD, 
+20, PA4, SPI1_CS SD Card Pin 2
+21, PA5, SPI1_SCK SD Card Pin 5
+22, PA6, SPI1_MISO SD Card Pin 7
+23, PA7, SPI1_MOSI SD Card Pin 3
+24, PC4, USART3_TX - MAX3226EETE pin 8
+25, PC5, USART3_RX - MAX3226EETE pin 6
+26, PB0, USART3's MAX3226EETE pin 9 (enable)
+27, PB1, USART2's MAX3226EETE pin 9 (enable)
+28, PB2, Enable pin (3) of the TPS70933DBVR regulator for SD card power
+29, PB10, AB-RTCMC-32.768kHz-EOA9-S3 pin 7 (~INTod)
+30, PB11, UART4's MAX3226EETE pin 9 (enable)
+31, VSS,
+32, VDD,
+33, PB12, SPI2_CS to AB-RTCMC-32.768kHz-EOA9-S3 pin 8 (CE)
+34, PB13, SPI2_SCK to AB-RTCMC-32.768kHz-EOA9-S3 pin 4 (CLK)
+35, PB14, SPI2_MISO to AB-RTCMC-32.768kHz-EOA9-S3 pin 5 (SOMI)
+36, PB15, SPI2_MOSI to AB-RTCMC-32.768kHz-EOA9-S3 pin 10 (SIMO)
+37, PC6, CLK_OE, to AB-RTCMC-32.768kHz-EOA9-S3 pin 1 (CLKOE)
+38, PC7, TIM3_CH2_CLOCKOUT to AB-RTCMC-32.768kHz-EOA9-S3 pin 3 (CLKOUT)
+39, PC8, No connection
+40, PC9, No connection
+41, PA8, Connected to the RX line of USART1 (intended for interrupt use)
+42, PA9, USART1_TX to FT234XD-R pin 10
+43, PA10, USART1_RX to FT234XD-R pin 7
+44, PA11, No connection
+45, PA12, No connection
+46, PA13, Debug connector
+47, VSS,
+48, VDD,
+49, PA14, Debug connector
+50, PA15, No connection
+51, PC10, No connection
+52, PC11, No connection
+53, PC12, UART5_TX - MAX3226EETE pin 8
+54, PD2, UART5_RX - MAX3226EETE pin 6
+55, PB3, Debug Connector
+56, PB4, to SN74LVC1G139DCUT pin 1
+57, PB5, to SN74LVC1G139DCUT pin 2
+58, PB6, No connection
+59, PB7, No connection
+60, BOOT0, BOOT_SEL jumper
+61, PB8, inductive charger signal sense (pin 6 of NC7WZ14P6X) detecting whether the prawler is docked or descending
+62, PB9, to pin 3 of NC7WZ14P6X to the wifi-enable pin of the wifi module
+63, VSS,
+64, VDD,  

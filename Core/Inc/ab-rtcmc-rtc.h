@@ -26,6 +26,8 @@ extern "C" {
 #define RTC_CLKOE_PORT     GPIOC
 #define RTC_CLKOUT_PIN     GPIO_PIN_7
 #define RTC_CLKOUT_PORT    GPIOC
+#define RTC_INT_PIN        GPIO_PIN_10
+#define RTC_INT_PORT       GPIOB
 #define RTC_CS_PIN         GPIO_PIN_12
 #define RTC_CS_PORT        GPIOB
 
@@ -100,6 +102,14 @@ extern "C" {
 #define RTC_CTRL_INT_V1IE           (1 << 2)  /* Voltage 1 Interrupt Enable */
 #define RTC_CTRL_INT_V2IE           (1 << 3)  /* Voltage 2 Interrupt Enable */
 #define RTC_CTRL_INT_SRIE           (1 << 4)  /* Self Recovery Interrupt Enable */
+#define RTC_INTERRUPT_ALARM         RTC_CTRL_INT_AIE
+#define RTC_INTERRUPT_TIMER         RTC_CTRL_INT_TIE
+#define RTC_INTERRUPT_VLOW1         RTC_CTRL_INT_V1IE
+#define RTC_INTERRUPT_VLOW2         RTC_CTRL_INT_V2IE
+#define RTC_INTERRUPT_SELF_RECOVERY RTC_CTRL_INT_SRIE
+#define RTC_INTERRUPT_MASK_ALL      (RTC_INTERRUPT_ALARM | RTC_INTERRUPT_TIMER | \
+                                     RTC_INTERRUPT_VLOW1 | RTC_INTERRUPT_VLOW2 | \
+                                     RTC_INTERRUPT_SELF_RECOVERY)
 
 /* Control_INT_Flag register bits (0x02) */
 #define RTC_CTRL_INT_FLAG_AF        (1 << 0)  /* Alarm Flag */
@@ -126,10 +136,15 @@ extern "C" {
 #define RTC_ALARM_ENABLE            (1 << 7)  /* Alarm Enable bitmask */
 
 /* Timer Division values */
-#define RTC_TIMER_DIV_4096HZ        0x00      /* 4096 Hz */
-#define RTC_TIMER_DIV_64HZ          0x20      /* 64 Hz (TD0=1) */
-#define RTC_TIMER_DIV_1HZ           0x40      /* 1 Hz (TD1=1) */
-#define RTC_TIMER_DIV_1_60HZ        0x60      /* 1/60 Hz (TD1=1, TD0=1) */
+#define RTC_TIMER_DIV_32HZ          0x00      /* 32 Hz */
+#define RTC_TIMER_DIV_8HZ           0x20      /* 8 Hz */
+#define RTC_TIMER_DIV_1HZ           0x40      /* 1 Hz */
+#define RTC_TIMER_DIV_0_5HZ         0x60      /* 0.5 Hz */
+
+/* Backwards-compatible aliases for older names in the codebase */
+#define RTC_TIMER_DIV_4096HZ        RTC_TIMER_DIV_32HZ
+#define RTC_TIMER_DIV_64HZ          RTC_TIMER_DIV_8HZ
+#define RTC_TIMER_DIV_1_60HZ        RTC_TIMER_DIV_0_5HZ
 
 /* EEPROM Control register bits (0x30) */
 #define RTC_EEPROM_CTRL_THP         (1 << 0)  /* Temperature High/Positive */
@@ -186,6 +201,12 @@ typedef struct {
     bool enabled;          /* Timer enable */
 } RTC_Timer_t;
 
+typedef struct {
+    uint8_t enabled_mask;  /* Control_INT register bits */
+    uint8_t flag_mask;     /* Control_INT Flag register bits */
+    uint8_t status_flags;  /* Control_Status register bits */
+} RTC_InterruptState_t;
+
 typedef enum {
     RTC_OK = 0,            /* Given a value of zero for error accumulation */
     RTC_ERROR,
@@ -222,11 +243,19 @@ RTC_Status_t RTC_SetTimerDivision(uint8_t division);
 /* Interrupt and flag operations */
 bool RTC_IsAlarmTriggered(void);
 bool RTC_IsTimerTriggered(void);
+RTC_Status_t RTC_GetInterruptFlags(uint8_t *flags);
+RTC_Status_t RTC_GetStatusFlags(uint8_t *status);
+RTC_Status_t RTC_GetInterruptState(RTC_InterruptState_t *state);
+RTC_Status_t RTC_ClearInterruptSources(uint8_t interrupt_mask);
 RTC_Status_t RTC_ClearAlarmFlag(void);
 RTC_Status_t RTC_ClearTimerFlag(void);
 RTC_Status_t RTC_ClearAllFlags(void);
 RTC_Status_t RTC_EnableInterrupt(uint8_t interrupt_mask);
 RTC_Status_t RTC_DisableInterrupt(uint8_t interrupt_mask);
+void RTC_NotifyInterrupt(void);
+bool RTC_IsInterruptPending(void);
+void RTC_ClearPendingInterrupt(void);
+bool RTC_IsInterruptAsserted(void);
 
 /* Temperature operations */
 RTC_Status_t RTC_GetTemperature(int8_t* temperature);

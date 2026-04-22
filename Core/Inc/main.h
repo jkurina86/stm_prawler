@@ -57,8 +57,6 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define PC3_BATTMON_EN_Pin GPIO_PIN_3
-#define PC3_BATTMON_EN_GPIO_Port GPIOC
 #define SPI1_CS_Pin GPIO_PIN_4
 #define SPI1_CS_GPIO_Port GPIOA
 #define PB0_USART3_EN_Pin GPIO_PIN_0
