@@ -59,7 +59,6 @@ void cmd_clear(int argc, char **argv);
 void cmd_status(int argc, char **argv);
 void cmd_low_power_on(int argc, char **argv);
 void cmd_pb8(int argc, char **argv);
-void cmd_reset(int argc, char **argv);
 void cmd_version(int argc, char **argv);
 /* RTC Command functions */
 void cmd_settime(int argc, char **argv);
@@ -76,7 +75,6 @@ void cmd_ctd(int argc, char **argv);
 /* Optode Command functions */
 void cmd_optode(int argc, char **argv);
 void cmd_optode_listen(int argc, char **argv);
-void cmd_optode_setup(int argc, char **argv);
 
 /* WetLab Command functions */
 void cmd_wetlab(int argc, char **argv);
@@ -100,14 +98,8 @@ void cmd_who(int argc, char **argv);
 /* File System Command functions */
 void cmd_fs_mount(int argc, char **argv);
 void cmd_fs_unmount(int argc, char **argv);
-void cmd_fs_df(int argc, char **argv);
 void cmd_fs_ls(int argc, char **argv);
 void cmd_fs_cat(int argc, char **argv);
-void cmd_fs_write(int argc, char **argv);
-void cmd_fs_rm(int argc, char **argv);
-void cmd_fs_mkdir(int argc, char **argv);
-void cmd_fs_rmdir(int argc, char **argv);
-void cmd_fs_cp(int argc, char **argv);
 
 #ifdef __cplusplus
 }

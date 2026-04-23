@@ -25,15 +25,12 @@ typedef enum {
     FS_INVALID_PARAM,
     FS_FILE_NOT_FOUND,
     FS_FILE_EXISTS,
-    FS_ACCESS_DENIED,
-    FS_EOF
+    FS_ACCESS_DENIED
 } FS_Result_t;
 
 /* Buffers for shell integration */
 typedef struct {
     char filename[64];
-    char dest_filename[64];
-    char dirname[128];
     char file_data[256];
 } FS_Buffers_t;
 
@@ -47,35 +44,20 @@ FS_Result_t filesystem_mount(void);
 FS_Result_t filesystem_unmount(void);
 bool filesystem_is_mounted(void);
 
-/* File system information */
-FS_Result_t filesystem_df(uint32_t *total_bytes, uint32_t *free_bytes, uint32_t *used_percent);
-
 /* Directory operations */
 FS_Result_t filesystem_ls(void (*print_callback)(const char *));
-FS_Result_t filesystem_mkdir(const char *dirname);
-FS_Result_t filesystem_rmdir(const char *dirname);
 
 /* File operations */
 FS_Result_t filesystem_cat(const char *filename, void (*print_callback)(const char *));
-FS_Result_t filesystem_write(const char *filename, const char *data);
-FS_Result_t filesystem_append(const char *filename, const char *data);
-FS_Result_t filesystem_rm(const char *filename);
-FS_Result_t filesystem_cp(const char *source, const char *destination);
 
 /* Log file operations for recorder */
 FS_Result_t filesystem_log_create(const char *filename);
 FS_Result_t filesystem_log_write(const uint8_t *data, uint16_t len);
 FS_Result_t filesystem_log_sync(void);
 FS_Result_t filesystem_log_close(void);
-FS_Result_t filesystem_log_delete(const char *filename);
 
 /* File search operations */
 FS_Result_t filesystem_find_latest(const char *suffix, char *out, int out_size);
-
-/* Sequential read operations */
-FS_Result_t filesystem_open_read(const char *filename);
-FS_Result_t filesystem_readline(char *buf, int maxlen);
-FS_Result_t filesystem_close_read(void);
 
 /* Buffer management for shell integration */
 FS_Buffers_t* filesystem_get_buffers(void);

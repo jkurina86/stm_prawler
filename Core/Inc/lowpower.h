@@ -36,9 +36,6 @@ void lowpower_sd_spi_up(void);
 void lowpower_rtc_spi_down(void);
 void lowpower_rtc_spi_up(void);
 
-void lowpower_rtc_clockout_down(void);
-void lowpower_rtc_clockout_up(void);
-
 /* Aggregated low-power flow -------------------------------------------------*/
 void lowpower_init(void);
 bool lowpower_request_on(void);

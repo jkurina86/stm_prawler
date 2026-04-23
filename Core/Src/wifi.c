@@ -170,30 +170,10 @@ static bool wifi_expect_ok(const char *cmd, const char *label,
     return true;
 }
 
-/* Software reset ------------------------------------------------------------*/
-
-/**
- * @brief  Software-reset the ISM4343 via the ZR AT command.
- *         Waits 3s for module boot, then syncs with an empty command.
- */
-static void wifi_soft_reset(void)
-{
-    char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("ZR", resp, sizeof(resp), 5000);
-    HAL_Delay(3000);
-    rb_flush();
-
-    /* Send empty command to sync prompt */
-    wifi_send_cmd("", resp, sizeof(resp), 2000);
-}
-
 /* Setup functions -----------------------------------------------------------*/
 
 static bool wifi_setup_ap(void)
 {
-    //shell_printf("[wifi] Resetting module...\r\n");
-    //wifi_soft_reset();
-
     shell_printf("[wifi] Configuring Access Point...\r\n");
     if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 2000))
         return false;
@@ -339,15 +319,6 @@ void wifi_printf(const char *format, ...)
             len = sizeof(buffer) - 1;
         wifi_write((const uint8_t *)buffer, (uint16_t)len);
     }
-}
-
-uint16_t wifi_read(uint8_t *buf, uint16_t buf_size)
-{
-    uint16_t count = 0;
-    uint8_t byte;
-    while (count < buf_size && rb_pop(&byte))
-        buf[count++] = byte;
-    return count;
 }
 
 uint16_t wifi_available(void)

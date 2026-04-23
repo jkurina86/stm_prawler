@@ -55,7 +55,6 @@ const shell_command_t shell_commands[] = {
     {"status", "Show system status", cmd_status},
     {"low-power-on", "Enter low-power sleep mode", cmd_low_power_on},
     {"pb8", "Show PB8 pin state", cmd_pb8},
-    {"reset", "Reset the system", cmd_reset},
     {"version", "Show firmware version", cmd_version},
 
     /* RTC Commands */
@@ -73,7 +72,6 @@ const shell_command_t shell_commands[] = {
     /* Optode Commands */
     {"optode", "Get Optode sensor data", cmd_optode},
     {"optode-listen", "Power-cycle optode and listen", cmd_optode_listen},
-    {"optode-setup", "Set optode to 9600 baud + terminal mode", cmd_optode_setup},
 
     /* WetLab Commands */
     {"wetlab", "Get WetLab sensor data", cmd_wetlab},
@@ -88,14 +86,8 @@ const shell_command_t shell_commands[] = {
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
     {"fs-unmount", "Unmount the file system", cmd_fs_unmount},
-    {"fs-df", "Show file system free space", cmd_fs_df},
     {"fs-ls", "List directory contents", cmd_fs_ls},
     {"fs-cat", "Read a file", cmd_fs_cat},
-    {"fs-write", "Write a file", cmd_fs_write},
-    {"fs-rm", "Delete a file", cmd_fs_rm},
-    {"fs-mkdir", "Create a directory", cmd_fs_mkdir},
-    {"fs-rmdir", "Remove a directory", cmd_fs_rmdir},
-    {"fs-cp", "Copy a file", cmd_fs_cp},
 
     /* WiFi Commands */
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
@@ -375,15 +367,6 @@ void cmd_pb8(int argc, char **argv)
     shell_printf("PB8 = %s\r\n", pin == GPIO_PIN_SET ? "HIGH" : "LOW");
 }
 
-void cmd_reset(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-
-    /* Schedule reset task with 3 second delay */
-    reset_args_t args = { .reset_due_ms = HAL_GetTick() + 3000u };
-    tasker_enqueue(handle_reset, &args, sizeof(args));
-}
-
 /**
   * @brief Version command
   * @note  Schedules version task for deferred execution
@@ -523,20 +506,6 @@ void cmd_fs_unmount(int argc, char **argv)
 }
 
 /**
-  * @brief Schedule a df task
-  * @param argc: Argument count
-  * @param argv: Arguments
-  * @retval None
-  * @note Requires the file system to be mounted. Sets a flag to handle in main loop context.
-  */
-void cmd_fs_df(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-
-    tasker_enqueue(handle_fs_df, NULL, 0);
-}
-
-/**
   * @brief Schedule an ls task
   * @param argc: Argument count
   * @param argv: Arguments (optional path)
@@ -569,123 +538,6 @@ void cmd_fs_cat(int argc, char **argv)
     tasker_enqueue(handle_fs_cat, NULL, 0);
 }
 
-/**
-  * @brief Schedule a write task
-  * @param argc: Argument count
-  * @param argv: Arguments (file path, content)
-  * @retval None
-  */
-void cmd_fs_write(int argc, char **argv)
-{
-    (void)argc; /* Unused arg */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0';
-    }
-
-    /* Copy file data into buffer */
-    if (argv[2] != NULL) {
-        strncpy(buffers->file_data, argv[2], sizeof(buffers->file_data) - 1);
-        buffers->file_data[sizeof(buffers->file_data) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_write, NULL, 0);
-}
-
-/**
-  * @brief Schedule an rm task
-  * @param argc: Argument count
-  * @param argv: Arguments (file path)
-  * @retval None
-  */
-void cmd_fs_rm(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_rm, NULL, 0);
-}
-
-/**
-  * @brief Schedule a mkdir task
-  * @param argc: Argument count
-  * @param argv: Arguments (directory path)
-  * @retval None
-  * @note Called from ISR context
-  */
-void cmd_fs_mkdir(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy directory name into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->dirname, argv[1], sizeof(buffers->dirname) - 1);
-        buffers->dirname[sizeof(buffers->dirname) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_mkdir, NULL, 0);
-}
-
-/**
-  * @brief Schedule an rmdir task
-  * @param argc: Argument count
-  * @param argv: Arguments (directory path)
-  * @retval None
-  */
-void cmd_fs_rmdir(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy directory name into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->dirname, argv[1], sizeof(buffers->dirname) - 1);
-        buffers->dirname[sizeof(buffers->dirname) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_rmdir, NULL, 0);
-}
-
-/** @brief Schedule a cp task
-  * @param argc: Argument count
-  * @param argv: Arguments (source path, destination path)
-  * @retval None
-  */
-void cmd_fs_cp(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-    
-    /* Copy source filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0';
-    }
-
-    /* Copy destination filename into buffer */
-    if (argv[2] != NULL) {
-        strncpy(buffers->dest_filename, argv[2], sizeof(buffers->dest_filename) - 1);
-        buffers->dest_filename[sizeof(buffers->dest_filename) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_cp, NULL, 0);
-}
-
 /* CTD Commands ---------------------------------------------------*/
 
 void cmd_ctd(int argc, char **argv)
@@ -706,12 +558,6 @@ void cmd_optode_listen(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_optode_listen, NULL, 0);
-}
-
-void cmd_optode_setup(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_optode_setup, NULL, 0);
 }
 
 /* WetLab Commands ------------------------------------------------*/

@@ -69,8 +69,6 @@ void Error_Handler(void);
 #define SPI2_CS_GPIO_Port GPIOB
 #define CLK_OE_Pin GPIO_PIN_6
 #define CLK_OE_GPIO_Port GPIOC
-#define TIM3_CH2_CLOCKOUT_Pin GPIO_PIN_7
-#define TIM3_CH2_CLOCKOUT_GPIO_Port GPIOC
 #define PA8_USART1_RX_INT_Pin GPIO_PIN_8
 #define PA8_USART1_RX_INT_GPIO_Port GPIOA
 #define PB4_AUX_SEL_A0_Pin GPIO_PIN_4

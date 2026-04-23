@@ -43,7 +43,6 @@ wifi_state_t wifi_get_state(void);
 /* Passthrough data API */
 uint16_t wifi_write(const uint8_t *data, uint16_t len);
 void wifi_printf(const char *format, ...);
-uint16_t wifi_read(uint8_t *buf, uint16_t buf_size);
 uint16_t wifi_available(void);
 uint32_t wifi_get_rx_count(void);
 void wifi_defer_prompt(void);

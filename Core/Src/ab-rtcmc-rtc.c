@@ -159,13 +159,11 @@ RTC_Status_t RTC_Init(void) {
             return status;
         }
 
-        /* Enable clock output */
-        status = RTC_EnableClockOutput(true);
+        /* Keep CLKOUT disabled; PC7/TIM3 capture is no longer configured. */
+        status = RTC_EnableClockOutput(false);
         if (status != RTC_OK) {
             return status;
         }
-
-        HAL_Delay(100); /* Wait for CLKOUT to stabilize with new frequency */
     } else {
         return status;
     }

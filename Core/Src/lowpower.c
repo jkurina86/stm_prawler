@@ -20,7 +20,6 @@
 /* External peripheral handles declared in main.c ---------------------------*/
 extern SPI_HandleTypeDef hspi1;
 extern SPI_HandleTypeDef hspi2;
-extern TIM_HandleTypeDef htim3;
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
@@ -33,7 +32,6 @@ typedef struct {
     bool filesystem_was_mounted;
     bool sd_power_was_enabled;
     bool wifi_was_enabled;
-    bool rtc_clockout_was_enabled;
 } lowpower_state_t;
 
 static lowpower_state_t g_lowpower_state;
@@ -299,57 +297,6 @@ void lowpower_rtc_spi_up(void)
     lowpower_restore_rtc_ce_pin();
 }
 
-void lowpower_rtc_clockout_down(void)
-{
-    HAL_GPIO_WritePin(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
-    HAL_TIM_Base_DeInit(&htim3);
-
-    lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(TIM3_CH2_CLOCKOUT_GPIO_Port, TIM3_CH2_CLOCKOUT_Pin, GPIO_NOPULL);
-}
-
-void lowpower_rtc_clockout_up(void)
-{
-    TIM_ClockConfigTypeDef clock_source = {0};
-    TIM_MasterConfigTypeDef master = {0};
-    TIM_IC_InitTypeDef input_capture = {0};
-
-    lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
-
-    htim3.Instance = TIM3;
-    htim3.Init.Prescaler = 7;
-    htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim3.Init.Period = 0xffff;
-    htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-    htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-    if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
-        Error_Handler();
-    }
-
-    clock_source.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-    if (HAL_TIM_ConfigClockSource(&htim3, &clock_source) != HAL_OK) {
-        Error_Handler();
-    }
-
-    if (HAL_TIM_IC_Init(&htim3) != HAL_OK) {
-        Error_Handler();
-    }
-
-    master.MasterOutputTrigger = TIM_TRGO_RESET;
-    master.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-    if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &master) != HAL_OK) {
-        Error_Handler();
-    }
-
-    input_capture.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-    input_capture.ICSelection = TIM_ICSELECTION_DIRECTTI;
-    input_capture.ICPrescaler = TIM_ICPSC_DIV1;
-    input_capture.ICFilter = 0;
-    if (HAL_TIM_IC_ConfigChannel(&htim3, &input_capture, TIM_CHANNEL_2) != HAL_OK) {
-        Error_Handler();
-    }
-}
-
 /* Aggregated low-power flow ------------------------------------------------*/
 
 void lowpower_init(void)
@@ -381,14 +328,13 @@ void lowpower_prepare_for_sleep(void)
     g_lowpower_state.filesystem_was_mounted = filesystem_is_mounted();
     g_lowpower_state.sd_power_was_enabled = (HAL_GPIO_ReadPin(SD_PWR_GPIO_Port, SD_PWR_Pin) == GPIO_PIN_SET);
     g_lowpower_state.wifi_was_enabled = (wifi_get_state() != WIFI_STATE_OFF);
-    g_lowpower_state.rtc_clockout_was_enabled = (HAL_GPIO_ReadPin(CLK_OE_GPIO_Port, CLK_OE_Pin) == GPIO_PIN_SET);
 
     if (g_lowpower_state.filesystem_was_mounted) {
         (void)filesystem_unmount();
     }
 
     /* Keep PB8 dock sense and PB10 RTC interrupt active as wake sources. */
-    lowpower_rtc_clockout_down();
+    lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
     lowpower_rtc_spi_down();
     lowpower_sd_spi_down();
     lowpower_wetlab_uart_down();
@@ -417,11 +363,7 @@ void lowpower_restore_from_sleep(void)
     }
 
     lowpower_rtc_spi_up();
-    lowpower_rtc_clockout_up();
-
-    if (g_lowpower_state.rtc_clockout_was_enabled) {
-        HAL_GPIO_WritePin(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_SET);
-    }
+    lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
 
     if (g_lowpower_state.filesystem_was_mounted && g_lowpower_state.sd_power_was_enabled) {
         FS_Result_t fs_status = filesystem_mount();

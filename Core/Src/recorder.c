@@ -400,8 +400,3 @@ void recorder_service(void)
         break;
     }
 }
-
-const char *recorder_get_last_filename(void)
-{
-    return last_successful_filename[0] ? last_successful_filename : NULL;
-}

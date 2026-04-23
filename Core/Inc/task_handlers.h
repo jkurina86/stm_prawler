@@ -17,10 +17,6 @@ extern "C" {
 /* Argument structures ---------------------------------------------------*/
 
 typedef struct {
-    uint32_t reset_due_ms;
-} reset_args_t;
-
-typedef struct {
     uint16_t year;
     uint8_t months;
     uint8_t days;
@@ -51,7 +47,6 @@ void handle_help(const void *arg);
 void handle_clear(const void *arg);
 void handle_status(const void *arg);
 void handle_low_power_on(const void *arg);
-void handle_reset(const void *arg);
 void handle_version(const void *arg);
 /* RTC */
 void handle_settime(const void *arg);
@@ -68,7 +63,6 @@ void handle_ctd(const void *arg);
 /* Optode */
 void handle_optode(const void *arg);
 void handle_optode_listen(const void *arg);
-void handle_optode_setup(const void *arg);
 
 /* WetLab */
 void handle_wetlab(const void *arg);
@@ -92,14 +86,8 @@ void handle_who(const void *arg);
 /* File System */
 void handle_fs_mount(const void *arg);
 void handle_fs_unmount(const void *arg);
-void handle_fs_df(const void *arg);
 void handle_fs_ls(const void *arg);
 void handle_fs_cat(const void *arg);
-void handle_fs_write(const void *arg);
-void handle_fs_rm(const void *arg);
-void handle_fs_mkdir(const void *arg);
-void handle_fs_rmdir(const void *arg);
-void handle_fs_cp(const void *arg);
 
 #ifdef __cplusplus
 }

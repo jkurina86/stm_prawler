@@ -92,23 +92,6 @@ void handle_low_power_on(const void *arg)
     shell_print("[lowpower] Sleep requested\r\n");
 }
 
-/** @brief  Handle the "reset" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_reset(const void *arg)
-{
-    const reset_args_t *a = (const reset_args_t *)arg;
-    shell_print("System resetting in 3 seconds...\r\n");
-
-    /* Spin until the target tick is reached */
-    while (HAL_GetTick() < a->reset_due_ms) {
-        /* wait */
-    }
-
-    NVIC_SystemReset();
-}
-
 /** @brief  Handle the "version" command
   * @param  arg: Pointer to arguments (not used)
   * @retval None
@@ -340,12 +323,6 @@ void handle_optode_listen(const void *arg)
     optode_listen();
 }
 
-void handle_optode_setup(const void *arg)
-{
-    (void)arg;
-    optode_setup();
-}
-
 /* WetLab Handlers --------------------------------------------------------*/
 
 void handle_wetlab(const void *arg)
@@ -484,27 +461,6 @@ void handle_fs_unmount(const void *arg)
     }
 }
 
-/** @brief  Handle the "fs-df" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_df(const void *arg)
-{
-    (void)arg;
-    uint32_t total, free_bytes, used_pct;
-
-    FS_Result_t res = filesystem_df(&total, &free_bytes, &used_pct);
-    if (res == FS_OK) {
-        shell_printf("Total: %lu bytes\r\n", total);
-        shell_printf("Free:  %lu bytes\r\n", free_bytes);
-        shell_printf("Used:  %lu%%\r\n", used_pct);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("df failed (err %d)\r\n", res);
-    }
-}
-
 /** @brief  Handle the "fs-ls" command
   * @param  arg: Pointer to arguments (not used)
   * @retval None
@@ -543,130 +499,6 @@ void handle_fs_cat(const void *arg)
         shell_printf("cat failed (err %d)\r\n", res);
     }
     shell_print("\r\n");
-}
-
-/** @brief  Handle the "fs-write" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_write(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0' || buf->file_data[0] == '\0') {
-        shell_print("Usage: fs-write <filename> <data>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_write(buf->filename, buf->file_data);
-    if (res == FS_OK) {
-        shell_printf("Written to %s\r\n", buf->filename);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("write failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-rm" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_rm(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0') {
-        shell_print("Usage: fs-rm <filename>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_rm(buf->filename);
-    if (res == FS_OK) {
-        shell_printf("Deleted %s\r\n", buf->filename);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res == FS_FILE_NOT_FOUND) {
-        shell_printf("File not found: %s\r\n", buf->filename);
-    } else {
-        shell_printf("rm failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-mkdir" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_mkdir(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->dirname[0] == '\0') {
-        shell_print("Usage: fs-mkdir <dirname>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_mkdir(buf->dirname);
-    if (res == FS_OK) {
-        shell_printf("Created directory %s\r\n", buf->dirname);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("mkdir failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-rmdir" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_rmdir(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->dirname[0] == '\0') {
-        shell_print("Usage: fs-rmdir <dirname>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_rmdir(buf->dirname);
-    if (res == FS_OK) {
-        shell_printf("Removed directory %s\r\n", buf->dirname);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("rmdir failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-cp" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_cp(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0' || buf->dest_filename[0] == '\0') {
-        shell_print("Usage: fs-cp <source> <dest>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_cp(buf->filename, buf->dest_filename);
-    if (res == FS_OK) {
-        shell_printf("Copied %s -> %s\r\n", buf->filename, buf->dest_filename);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res == FS_FILE_NOT_FOUND) {
-        shell_printf("Source not found: %s\r\n", buf->filename);
-    } else {
-        shell_printf("cp failed (err %d)\r\n", res);
-    }
 }
 
 /* WiFi Handlers ----------------------------------------------------------*/
