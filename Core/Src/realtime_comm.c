@@ -3,8 +3,9 @@
   * @file    realtime_comm.c
   * @brief   Realtime hex-encoded CSV streaming over WiFi.
  * @note    After each profile finishes normalizing, realtime_comm_build()
- *          formats the CSV payload into rt_buf and caches its CRC/length.
- *          realtime_comm_stream() sends the preamble, newline, then the CSV.
+ *          formats the CSV payload into rt_buf and caches its frame CRC/length.
+ *          realtime_comm_stream() sends "@@@" + CRC + length + "\n", then
+ *          the CSV payload bytes.
   ******************************************************************************
   */
 
@@ -26,7 +27,7 @@ static uint16_t rt_crc;
  * realtime request before any profile has been built reports No_Data. */
 static uint8_t data_sent = 1;
 
-static uint32_t rt_crc_accum(uint32_t accum, uint8_t ch)
+static uint32_t rt_crc16_xmodem_accum(uint32_t accum, uint8_t ch)
 {
     accum |= (uint32_t)ch;
 
@@ -40,20 +41,21 @@ static uint32_t rt_crc_accum(uint32_t accum, uint8_t ch)
     return accum;
 }
 
-static uint32_t rt_crc_update(uint32_t accum, const uint8_t *data, uint16_t len)
+static uint32_t rt_crc16_xmodem_update(uint32_t accum, const uint8_t *data, uint16_t len)
 {
     for (uint16_t i = 0; i < len; i++) {
-        accum = rt_crc_accum(accum, data[i]);
+        accum = rt_crc16_xmodem_accum(accum, data[i]);
     }
 
     return accum;
 }
 
-static uint16_t rt_crc_finish(uint32_t accum)
+static uint16_t rt_crc16_xmodem_finish(uint32_t accum)
 {
-    /* Forces compatibility with XMODEM. */
-    accum = rt_crc_accum(accum, 0U);
-    accum = rt_crc_accum(accum, 0U);
+    /* CRC-16/XMODEM-compatible finish: init 0x0000, poly 0x1021,
+     * two final zero-byte augmentations. Check "123456789" -> 0x31C3. */
+    accum = rt_crc16_xmodem_accum(accum, 0U);
+    accum = rt_crc16_xmodem_accum(accum, 0U);
 
     return (uint16_t)(accum >> 8);
 }
@@ -95,7 +97,7 @@ void realtime_comm_build(const profile_data_t *profile)
                      "EP,CD,CT,CC,OT,O2,CH,TB,CD\n");
     } else if (!has_wetlab && has_optode) {
         n = snprintf(csv_buf, csv_capacity,
-                     "EP,CD,CT,CC,O2\n");
+                     "EP,CD,CT,CC,OT,O2\n");
     } else {
         n = snprintf(csv_buf, csv_capacity,
                      "EP,CD,CT,CC\n");
@@ -163,14 +165,15 @@ void realtime_comm_build(const profile_data_t *profile)
     /* Create an ASCII-Encoded hex-length string */
     (void)snprintf(len_ascii, sizeof(len_ascii), "%04X", csv_len);
 
-    /* Add the Length to the CRC */
-    crc_accum = rt_crc_update(crc_accum, (const uint8_t *)len_ascii, RT_LEN_ASCII_LEN);
+    /* CRC covers the ASCII length field plus CSV payload bytes only. It does
+     * not cover the "@@@" preamble, CRC field, or newline after the length. */
+    crc_accum = rt_crc16_xmodem_update(crc_accum, (const uint8_t *)len_ascii, RT_LEN_ASCII_LEN);
 
-    /* Add the CSV Data to the CRC */
-    crc_accum = rt_crc_update(crc_accum, (const uint8_t *)rt_buf, csv_len);
+    /* Add the CSV data to the CRC. */
+    crc_accum = rt_crc16_xmodem_update(crc_accum, (const uint8_t *)rt_buf, csv_len);
 
     /* Finish the CRC calculation */
-    rt_crc = rt_crc_finish(crc_accum);
+    rt_crc = rt_crc16_xmodem_finish(crc_accum);
 
     /* Update the length of the realtime data transfer */
     rt_len = csv_len;

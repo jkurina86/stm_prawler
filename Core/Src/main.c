@@ -160,8 +160,13 @@ int main(void)
       shell_printf("SD card mount failed\r\n");
   }
 
-  RTC_Init();
-  g_app.rtc_status = PERIPH_READY;
+  RTC_Status_t rtc_init_status = RTC_Init();
+  if (rtc_init_status == RTC_OK) {
+      g_app.rtc_status = PERIPH_READY;
+  } else {
+      g_app.rtc_status = PERIPH_ERROR;
+      shell_printf("RTC init failed (err %d)\r\n", rtc_init_status);
+  }
 
   ctd_init(&huart3);
   g_app.ctd_status = PERIPH_READY;
