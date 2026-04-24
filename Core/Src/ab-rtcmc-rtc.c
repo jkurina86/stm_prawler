@@ -278,7 +278,7 @@ RTC_Status_t RTC_SetDateTime(RTC_DateTime_t* datetime) {
         datetime->hours > 23 || datetime->weekdays > 7 || datetime->weekdays == 0 ||
         datetime->days > 31 || datetime->days == 0 ||
         datetime->months > 12 || datetime->months == 0 ||
-        datetime->years > 99) {
+        datetime->years > 79) {
         return RTC_INVALID_PARAM;
     }
 
@@ -348,7 +348,7 @@ if (datetime == NULL) {
     datetime->days = RTC_BCD2Bin(regs[3] & 0x3F);        /* Day of month, mask with 0011 1111 (tens: 0-3) and (ones: 0-9)*/
     datetime->weekdays = RTC_BCD2Bin(regs[4] & 0x07);    /* Day of week,  mask with 0000 0111 (ones: 1-7) */
     datetime->months = RTC_BCD2Bin(regs[5] & 0x1F);      /* Month, mask with 0001 1111 (tens: 0-1) and (ones: 0-9) */
-    datetime->years = RTC_BCD2Bin(regs[6] & 0x7F);       /* Year, mask with 0111 1111 (tens: 0-9) and (ones: 0-9) */
+    datetime->years = RTC_BCD2Bin(regs[6] & 0x7F);       /* Year, mask with 0111 1111 (tens: 0-7) and (ones: 0-9) */
     
     return RTC_OK;
 }
@@ -663,6 +663,14 @@ RTC_Status_t RTC_SetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
         return RTC_INVALID_PARAM;
     }
 
+    if (alarm->seconds > 59 || alarm->minutes > 59 ||
+        alarm->hours > 23 || alarm->days > 31 || alarm->days == 0 ||
+        alarm->weekdays > 7 || alarm->weekdays == 0 ||
+        alarm->months > 12 || alarm->months == 0 ||
+        alarm->years > 79) {
+        return RTC_INVALID_PARAM;
+    }
+
     /* Convert values to BCD and fill registers */
     uint8_t sec_reg = RTC_Bin2BCD(alarm->seconds);
     uint8_t min_reg = RTC_Bin2BCD(alarm->minutes);
@@ -680,8 +688,6 @@ RTC_Status_t RTC_SetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     if (alarm->hours_enable) { hour_reg |= RTC_ALARM_ENABLE; }
     if (alarm->days_enable) { day_reg |= RTC_ALARM_ENABLE; }
     if (alarm->weekdays_enable) { weekday_reg |= RTC_ALARM_ENABLE; }
-    if (alarm->months_enable) { month_reg |= RTC_ALARM_ENABLE; }
-    if (alarm->years_enable) { year_reg |= RTC_ALARM_ENABLE; }
     if (alarm->months_enable) { month_reg |= RTC_ALARM_ENABLE; }
     if (alarm->years_enable) { year_reg |= RTC_ALARM_ENABLE; }
 
@@ -745,22 +751,32 @@ RTC_Status_t RTC_SetTimer(RTC_Timer_t* timer) {
         return RTC_INVALID_PARAM;
     }
 
-    RTC_Status_t status = RTC_OK;
-
-    /* Set timer value (16-bit split into low and high bytes) */
-    status |= RTC_WriteRegister(RTC_REG_TIMER_LOW, timer->timer_value & 0xFF);
-    status |= RTC_WriteRegister(RTC_REG_TIMER_HIGH, (timer->timer_value >> 8) & 0xFF);
-
-    /* Read current control register to preserve CLK_INT bit */
     uint8_t ctrl1;
-    status = RTC_ReadRegister(RTC_REG_CONTROL_1, &ctrl1);
+    RTC_Status_t status = RTC_ReadRegister(RTC_REG_CONTROL_1, &ctrl1);
     if (status != RTC_OK) {
         return status;
     }
 
-    /* Clear timer-related bits, preserve CLK_INT */
-    ctrl1 &= ~(RTC_CTRL1_TE | RTC_CTRL1_TAR | 0x60);  /* Clear TE, TAR, TD1, TD0 */
+    /* Timer source and countdown value writes require TE=0 and TAR=0. */
+    ctrl1 &= (uint8_t)~(RTC_CTRL1_TE | RTC_CTRL1_TAR);
     ctrl1 |= RTC_CTRL1_WE;  /* Always enable write */
+    status = RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_WriteRegister(RTC_REG_TIMER_LOW, timer->timer_value & 0xFF);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_WriteRegister(RTC_REG_TIMER_HIGH, (timer->timer_value >> 8) & 0xFF);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    ctrl1 &= (uint8_t)~(RTC_CTRL1_TAR | RTC_CTRL1_TD0 | RTC_CTRL1_TD1);
+    ctrl1 |= (timer->division & (RTC_CTRL1_TD0 | RTC_CTRL1_TD1));
 
     if (timer->enabled) {
         ctrl1 |= RTC_CTRL1_TE;
@@ -769,12 +785,7 @@ RTC_Status_t RTC_SetTimer(RTC_Timer_t* timer) {
         ctrl1 |= RTC_CTRL1_TAR;
     }
 
-    /* Set timer division */
-    ctrl1 |= (timer->division & 0x60);  /* grab TD1 and TD0 bits with mask: 0110 0000 */
-
-    status |= RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
-
-    return status;
+    return RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
 }
 
 /**
@@ -801,7 +812,7 @@ RTC_Status_t RTC_GetTimer(RTC_Timer_t* timer) {
     timer->timer_value = (timer_high << 8) | timer_low;
     timer->enabled = (ctrl1 & RTC_CTRL1_TE) ? true : false;
     timer->auto_reload = (ctrl1 & RTC_CTRL1_TAR) ? true : false;
-    timer->division = ctrl1 & 0x60;  /* grab TD1 and TD0 bits with mask: 0110 0000 */
+    timer->division = ctrl1 & (RTC_CTRL1_TD0 | RTC_CTRL1_TD1);
 
     return RTC_OK;
 }
@@ -828,8 +839,10 @@ RTC_Status_t RTC_EnableTimer(bool enable) {
 }
 
 /**
-  * @brief  Set timer division (frequency) for CLKOUT
-  * @param  division: Timer division setting (RTC_TIMER_DIV_xxxx)
+  * @brief  Set countdown timer source clock.
+  * @param  division: Countdown timer source clock (RTC_TIMER_DIV_*)
+  * @note   Per the RTC manual, TD1:TD0 should only be changed while the
+  *         countdown timer is disabled.
   * @retval RTC status
   */
 RTC_Status_t RTC_SetTimerDivision(uint8_t division) {
@@ -840,13 +853,13 @@ RTC_Status_t RTC_SetTimerDivision(uint8_t division) {
         return RTC_ERROR;
     }
     
-    /* Clear existing TD1 and TD0 bits (bits 6:5) */
-    ctrl1 &= ~0x60;  /* Clear bits 6:5 (TD1:TD0) */
+    /* Clear existing TD1 and TD0 bits. */
+    ctrl1 &= (uint8_t)~(RTC_CTRL1_TD0 | RTC_CTRL1_TD1);
     
-    /* Set new timer division */
-    ctrl1 |= (division & 0x60);  /* Set TD1 and TD0 bits */
+    /* Set new timer source clock. */
+    ctrl1 |= (division & (RTC_CTRL1_TD0 | RTC_CTRL1_TD1));
     
-    /* Ensure write enable is set for any register writes DEBUG */
+    /* Ensure write enable is set for the register write. */
     ctrl1 |= RTC_CTRL1_WE;
     
     /* Write back the modified control register */
@@ -1071,7 +1084,7 @@ uint8_t RTC_GetDaysInMonth(uint8_t month, uint16_t year) {
 
 /**
   * @brief  Convert RTC date/time to GPS epoch seconds
-  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-99, meaning 2000-2099)
+  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-79, meaning 2000-2079)
   * @retval Seconds since GPS epoch (Jan 6, 1980 00:00:00 UTC)
   */
 uint32_t RTC_ToGPSEpoch(const RTC_DateTime_t *dt)
@@ -1109,7 +1122,7 @@ uint32_t RTC_ToGPSEpoch(const RTC_DateTime_t *dt)
 
 /**
   * @brief  Convert RTC date/time to Unix epoch seconds
-  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-99, meaning 2000-2099)
+  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-79, meaning 2000-2079)
   * @retval Seconds since Unix epoch (Jan 1, 1970 00:00:00 UTC)
   */
 uint32_t RTC_ToUnixEpoch(const RTC_DateTime_t *dt)
@@ -1145,7 +1158,7 @@ uint32_t RTC_ToUnixEpoch(const RTC_DateTime_t *dt)
 /**
   * @brief  Convert Unix epoch seconds to RTC date/time
   * @param  unix_epoch: Seconds since Jan 1, 1970 00:00:00 UTC
-  * @param  dt: Pointer to RTC_DateTime_t to fill (years field = 0-99 for 2000-2099)
+  * @param  dt: Pointer to RTC_DateTime_t to fill (years field = 0-79 for 2000-2079)
   */
 void RTC_FromUnixEpoch(uint32_t unix_epoch, RTC_DateTime_t *dt)
 {

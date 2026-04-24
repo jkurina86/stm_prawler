@@ -24,9 +24,10 @@ extern "C" {
 /* NORM_SAMPLES mirrors the value in recorder.c. Kept in sync by PROFILE_MAX_MEASUREMENTS. */
 #define PROFILE_NORM_SAMPLES       30
 
-/* Worst-case total samples: one initial sample at PB8 trigger, plus the largest
- * profile cap (CTD-only = 315), plus the normalization phase. */
-#define PROFILE_MAX_MEASUREMENTS   (1 + MEASUREMENTS_CTD_ONLY + PROFILE_NORM_SAMPLES)
+/* Worst-case appended samples: the largest profile cap (CTD-only = 315), plus
+ * the normalization phase. The immediate PB8 probe sample is only used for
+ * false-start detection and is not appended to the profile. */
+#define PROFILE_MAX_MEASUREMENTS   (MEASUREMENTS_CTD_ONLY + PROFILE_NORM_SAMPLES)
 
 typedef struct {
     uint32_t       timestamp;   /* Unix epoch UTC (seconds since Jan 1, 1970) */

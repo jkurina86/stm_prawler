@@ -157,12 +157,18 @@ void handle_rtc_settime(const void *arg)
 
     if (!a->valid) {
         shell_print("Usage: rtc-settime YYYY MM DD HH MM SS WD\r\n");
+        shell_print("  YYYY = 2000..2079\r\n");
         shell_print("  WD = weekday (1=Sun..7=Sat)\r\n");
         return;
     }
 
+    if (a->year < 2000 || a->year > 2079) {
+        shell_print("RTC year must be 2000..2079\r\n");
+        return;
+    }
+
     RTC_DateTime_t dt = {0};
-    dt.years    = (uint8_t)(a->year % 100);
+    dt.years    = (uint8_t)(a->year - 2000);
     dt.months   = a->months;
     dt.days     = a->days;
     dt.hours    = a->hours;

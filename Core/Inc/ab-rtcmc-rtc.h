@@ -135,16 +135,11 @@ extern "C" {
 /* Alarm Enable bits (bit 7 of each alarm register) */
 #define RTC_ALARM_ENABLE            (1 << 7)  /* Alarm Enable bitmask */
 
-/* Timer Division values */
+/* Countdown Timer source clock values (Control_1 TD1:TD0) */
 #define RTC_TIMER_DIV_32HZ          0x00      /* 32 Hz */
 #define RTC_TIMER_DIV_8HZ           0x20      /* 8 Hz */
 #define RTC_TIMER_DIV_1HZ           0x40      /* 1 Hz */
 #define RTC_TIMER_DIV_0_5HZ         0x60      /* 0.5 Hz */
-
-/* Backwards-compatible aliases for older names in the codebase */
-#define RTC_TIMER_DIV_4096HZ        RTC_TIMER_DIV_32HZ
-#define RTC_TIMER_DIV_64HZ          RTC_TIMER_DIV_8HZ
-#define RTC_TIMER_DIV_1_60HZ        RTC_TIMER_DIV_0_5HZ
 
 /* EEPROM Control register bits (0x30) */
 #define RTC_EEPROM_CTRL_THP         (1 << 0)  /* Temperature High/Positive */
@@ -157,26 +152,30 @@ extern "C" {
 #define RTC_EEPROM_CTRL_R80K        (1 << 7)  /* 80k resistor */
 
 /* Data structures -----------------------------------------------------------*/
+
+/* Public date/alarm fields use binary values. The driver converts these values
+ * to and from the RTC clock/alarm registers, which are BCD-encoded internally.
+ * The current driver supports 24-hour mode only. */
 typedef struct {
     uint8_t seconds;    /* 0-59 */
     uint8_t minutes;    /* 0-59 */
-    uint8_t hours;      /* 0-23 (24h) or 1-12 (12h) */
+    uint8_t hours;      /* 0-23 */
     uint8_t days;       /* 1-31 (day of month) */
-    uint8_t weekdays;   /* 1-7 (1=Sunday, stored in BCD format) */
+    uint8_t weekdays;   /* 1-7 (1=Sunday) */
     uint8_t months;     /* 1-12 */
-    uint8_t years;      /* 0-99 (20xx) */
-    bool is_12h_format; /* true for 12h, false for 24h */
-    bool is_pm;         /* true for PM in 12h format */
+    uint8_t years;      /* 0-79 (2000-2079) */
+    bool is_12h_format; /* Reserved for future 12h support; currently false */
+    bool is_pm;         /* Reserved for future 12h support; currently false */
 } RTC_DateTime_t;
 
 typedef struct {
     uint8_t seconds;     /* 0-59 */
     uint8_t minutes;     /* 0-59 */
-    uint8_t hours;       /* 0-23 (24h) or 1-12 (12h) */
+    uint8_t hours;       /* 0-23 */
     uint8_t days;        /* 1-31 (day of month) */
-    uint8_t weekdays;    /* 1=Sunday to 7=Saturday (BCD format) */
+    uint8_t weekdays;    /* 1=Sunday to 7=Saturday */
     uint8_t months;      /* 1-12 */
-    uint8_t years;       /* 0-99 (20xx) */
+    uint8_t years;       /* 0-79 (2000-2079) */
     bool seconds_enable; /* Enable seconds alarm */
     bool minutes_enable; /* Enable minutes alarm */
     bool hours_enable;   /* Enable hours alarm */
@@ -189,16 +188,16 @@ typedef struct {
 typedef struct {
     uint8_t seconds;    /* 0-59 */
     uint8_t minutes;    /* 0-59 */
-    uint8_t hours;      /* 0-23 (24h) or 1-12 (12h) */
+    uint8_t hours;      /* 0-23 */
     uint8_t date;       /* 1-31 */
     bool enabled;       /* Alarm enable/disable */
 } RTC_Alarm_t;
 
 typedef struct {
-    uint16_t timer_value;  /* 16-bit timer value */
-    uint8_t division;      /* Timer division setting */
-    bool auto_reload;      /* Auto reload enable */
-    bool enabled;          /* Timer enable */
+    uint16_t timer_value;  /* 16-bit countdown value */
+    uint8_t division;      /* RTC_TIMER_DIV_* countdown source clock */
+    bool auto_reload;      /* Countdown auto-reload enable */
+    bool enabled;          /* Countdown timer enable */
 } RTC_Timer_t;
 
 typedef struct {
