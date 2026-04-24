@@ -1,10 +1,25 @@
 #!/usr/bin/env python3
-"""Decode a hex-encoded idata.csv from the prawler realtime stream into a
-human-readable RECORDS.csv with physical units.
+"""Decode Prawler idata CSV or framed idata captures into physical units.
 
 Usage:
     python RecordTranslator.py idata.csv
+    python RecordTranslator.py framed_idata.txt
     python RecordTranslator.py idata.csv -o output.csv
+
+Inputs can be either the raw payload CSV or a full framed capture:
+    @@@CCCCLLLL\n<payload>
+
+CCCC is the frame CRC and LLLL is the payload byte count. The CRC covers the
+four ASCII length bytes followed by exactly LLLL payload bytes. It excludes the
+@@@ preamble, CCCC field, and separator newline. The firmware uses a
+CRC-16/XMODEM-compatible algorithm with init 0x0000, polynomial 0x1021, and two
+final zero-byte augmentations. The check vector "123456789" is 0x31C3.
+
+The short payload headers are fixed by an upstream system and are decoded
+positionally. Do not rename them on the wire:
+    EP,CD,CT,CC
+    EP,CD,CT,CC,OT,O2
+    EP,CD,CT,CC,OT,O2,CH,TB,CD
 
 Scaling factors (from realtime_comm.c):
     datetime  uint32  raw Unix epoch (seconds)
@@ -20,6 +35,7 @@ Scaling factors (from realtime_comm.c):
 
 import argparse
 import csv
+import io
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,10 +52,21 @@ def hex_to_uint16(h: str) -> int:
     return int(h, 16)
 
 
-LEGACY_SHORT_HEADER = ["ep", "cd", "ct", "cc", "ot", "o2", "ch", "tb", "cd"]
-LEGACY_SHORT_COLUMNS = [
-    "datetime", "depth", "temp", "cond", "o2temp", "o2", "wl_c1", "wl_c2", "wl_c3"
-]
+FRAME_PREFIX = b"@@@"
+FRAME_HEADER_LEN = 12
+
+POSITIONAL_SHORT_HEADERS = {
+    ("ep", "cd", "ct", "cc"): [
+        "datetime", "depth", "temp", "cond",
+    ],
+    ("ep", "cd", "ct", "cc", "ot", "o2"): [
+        "datetime", "depth", "temp", "cond", "o2temp", "o2",
+    ],
+    ("ep", "cd", "ct", "cc", "ot", "o2", "ch", "tb", "cd"): [
+        "datetime", "depth", "temp", "cond", "o2temp", "o2",
+        "wl_c1", "wl_c2", "wl_c3",
+    ],
+}
 
 OUTPUT_FIELDS = [
     "Unix_Epoch_UTC", "DateTime_UTC",
@@ -64,10 +91,96 @@ INPUT_ALIASES = {
 }
 
 
+class FrameError(ValueError):
+    pass
+
+
+def rt_crc16_xmodem_accum(accum: int, ch: int) -> int:
+    accum = (accum | ch) & 0xFFFFFFFF
+
+    for _ in range(8):
+        accum = (accum << 1) & 0xFFFFFFFF
+        if accum & 0x1000000:
+            accum = (accum ^ 0x102100) & 0xFFFFFFFF
+
+    return accum
+
+
+def rt_crc16_xmodem(data: bytes) -> int:
+    accum = 0
+    for ch in data:
+        accum = rt_crc16_xmodem_accum(accum, ch)
+
+    accum = rt_crc16_xmodem_accum(accum, 0)
+    accum = rt_crc16_xmodem_accum(accum, 0)
+    return (accum >> 8) & 0xFFFF
+
+
+def parse_framed_payload(raw: bytes) -> tuple[bytes, int]:
+    if len(raw) < FRAME_HEADER_LEN:
+        raise FrameError("framed capture is shorter than @@@CCCCLLLL\\n")
+
+    if not raw.startswith(FRAME_PREFIX):
+        raise FrameError("framed capture does not start with @@@")
+
+    try:
+        crc_text = raw[3:7].decode("ascii")
+        len_text = raw[7:11].decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise FrameError("frame CRC/length fields are not ASCII") from exc
+
+    if raw[11:12] != b"\n":
+        raise FrameError("expected newline after frame length")
+
+    try:
+        expected_crc = int(crc_text, 16)
+        payload_len = int(len_text, 16)
+    except ValueError as exc:
+        raise FrameError("frame CRC/length fields must be hexadecimal") from exc
+
+    payload_start = FRAME_HEADER_LEN
+    payload_end = payload_start + payload_len
+    if len(raw) < payload_end:
+        raise FrameError(
+            f"frame declares {payload_len} payload bytes, "
+            f"but only {len(raw) - payload_start} are present"
+        )
+
+    payload = raw[payload_start:payload_end]
+    actual_crc = rt_crc16_xmodem(len_text.encode("ascii") + payload)
+    if actual_crc != expected_crc:
+        raise FrameError(
+            f"CRC mismatch: frame has 0x{expected_crc:04X}, "
+            f"computed 0x{actual_crc:04X}"
+        )
+
+    return payload, len(raw) - payload_end
+
+
+def load_payload_text(path: Path) -> str:
+    raw = path.read_bytes()
+
+    if raw.startswith(FRAME_PREFIX):
+        payload, trailing_len = parse_framed_payload(raw)
+        if trailing_len:
+            print(
+                f"Warning: ignoring {trailing_len} trailing byte(s) after framed payload",
+                file=sys.stderr,
+            )
+    else:
+        payload = raw
+
+    try:
+        return payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path} is not valid UTF-8/ASCII text") from exc
+
+
 def normalize_header(header: list[str]) -> list[str]:
     cols = [col.strip().lower() for col in header]
-    if cols == LEGACY_SHORT_HEADER:
-        return LEGACY_SHORT_COLUMNS
+    positional = POSITIONAL_SHORT_HEADERS.get(tuple(cols))
+    if positional is not None:
+        return positional
     return [INPUT_ALIASES.get(col, col) for col in cols]
 
 
@@ -101,9 +214,9 @@ def decode_row(row: list[str], header: list[str]) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Decode hex-encoded idata.csv into human-readable RECORDS.csv"
+        description="Decode idata CSV or framed idata captures into RECORDS.csv"
     )
-    parser.add_argument("input", help="Path to idata.csv")
+    parser.add_argument("input", help="Path to idata payload CSV or framed capture")
     parser.add_argument("-o", "--output", default=None,
                         help="Output CSV path (default: RECORDS.csv next to input)")
     args = parser.parse_args()
@@ -119,10 +232,21 @@ def main():
         output_path = input_path.parent / "RECORDS.csv"
 
     rows_decoded = 0
-    with open(input_path, newline="") as fin, \
+    try:
+        payload_text = load_payload_text(input_path)
+    except (FrameError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    with io.StringIO(payload_text, newline="") as fin, \
          open(output_path, "w", newline="") as fout:
         reader = csv.reader(fin)
-        header = normalize_header(next(reader))
+        try:
+            header = normalize_header(next(reader))
+        except StopIteration:
+            print("Error: input payload is empty", file=sys.stderr)
+            sys.exit(1)
+
         if "datetime" not in header:
             print(f"Warning: unexpected header: {header}", file=sys.stderr)
 

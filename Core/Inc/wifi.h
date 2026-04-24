@@ -43,9 +43,9 @@ wifi_state_t wifi_get_state(void);
 /* Passthrough data API */
 uint16_t wifi_write(const uint8_t *data, uint16_t len);
 void wifi_printf(const char *format, ...);
+void wifi_prompt(void);
 uint16_t wifi_available(void);
 uint32_t wifi_get_rx_count(void);
-void wifi_defer_prompt(void);
 
 /* Callback notify function (called from centralized HAL callback) */
 void wifi_notify_rx_cplt(void);

@@ -28,6 +28,7 @@ extern IWDG_HandleTypeDef hiwdg;
 #define RX_RING_SIZE    512
 #define RESP_BUF_SIZE   512
 #define WIFI_CMD_BUF_SIZE  SHELL_MAX_CMD_LEN
+#define WIFI_SHELL_PROMPT "$ "
 
 /* Private types -------------------------------------------------------------*/
 typedef struct {
@@ -47,7 +48,7 @@ static char wifi_cmd_buf[WIFI_CMD_BUF_SIZE];
 static uint16_t wifi_cmd_pos;
 static uint8_t wifi_last_eol;   /* last CR/LF byte seen, to collapse \r\n pairs */
 static volatile uint32_t wifi_rx_count; /* total bytes received via ISR (diagnostic) */
-static bool wifi_prompt_deferred;  /* when set, wifi_service skips the next "> " prompt */
+static bool wifi_prompt_deferred;  /* when set, wifi_service skips the next "$ " prompt */
 
 /* Ring buffer helpers -------------------------------------------------------*/
 
@@ -83,6 +84,25 @@ static inline bool rb_pop(uint8_t *byte)
 static inline void rb_flush(void)
 {
     rx_ring.tail = rx_ring.head;
+}
+
+static bool wifi_command_defers_prompt(const char *cmd_line)
+{
+    while (*cmd_line == ' ')
+        cmd_line++;
+
+    const char *token_end = cmd_line;
+    while (*token_end != '\0' && *token_end != ' ')
+        token_end++;
+
+    size_t token_len = (size_t)(token_end - cmd_line);
+    return ((token_len == 5U && strncmp(cmd_line, "idata", 5U) == 0) ||
+            (token_len == 3U && strncmp(cmd_line, "who", 3U) == 0));
+}
+
+static void wifi_defer_prompt(void)
+{
+    wifi_prompt_deferred = true;
 }
 
 /* ISR callback --------------------------------------------------------------*/
@@ -206,6 +226,14 @@ static bool wifi_setup_tcp_server(void)
     shell_printf("[wifi] Configuring TCP passthrough on port %s...\r\n",
                  WIFI_TCP_PORT);
 
+    if (!wifi_expect_ok("P0=0", "Select socket 0", 2000))
+        return false;
+    if (!wifi_expect_ok("P6=0", "Stop TCP client", 2000))
+        return false;
+    if (!wifi_expect_ok("P5=0", "Stop TCP server", 2000))
+        return false;
+    if (!wifi_expect_ok("P1=0", "Set TCP protocol", 2000))
+        return false;
     if (!wifi_expect_ok("P2=" WIFI_TCP_PORT, "Set Local Port", 2000))
         return false;
     if (!wifi_expect_ok("S1=1460", "Set Write Packet Size", 2000))
@@ -240,6 +268,8 @@ void wifi_init(UART_HandleTypeDef *huart)
     wifi_huart = huart;
     rb_init();
     wifi_cmd_pos = 0;
+    wifi_last_eol = 0;
+    wifi_prompt_deferred = false;
     state = WIFI_STATE_INIT;
     g_app.wifi_state = (uint8_t)state;
 
@@ -292,6 +322,7 @@ void wifi_down(void)
     rb_flush();
     wifi_cmd_pos = 0;
     wifi_last_eol = 0;
+    wifi_prompt_deferred = false;
     state = WIFI_STATE_OFF;
     g_app.wifi_state = (uint8_t)state;
 }
@@ -321,6 +352,12 @@ void wifi_printf(const char *format, ...)
     }
 }
 
+void wifi_prompt(void)
+{
+    wifi_write((const uint8_t *)WIFI_SHELL_PROMPT,
+               (uint16_t)(sizeof(WIFI_SHELL_PROMPT) - 1U));
+}
+
 uint16_t wifi_available(void)
 {
     uint16_t h = rx_ring.head;
@@ -333,18 +370,13 @@ uint32_t wifi_get_rx_count(void)
     return wifi_rx_count;
 }
 
-void wifi_defer_prompt(void)
-{
-    wifi_prompt_deferred = true;
-}
-
 /* Main-loop service -- WiFi shell -------------------------------------------*/
 
 /**
  * @brief  Non-blocking WiFi shell, call from main loop.
  *
  *  Drains the RX ring buffer, assembles command lines, and dispatches
- *  them via the shared shell command table.  Sends "> " prompt back
+ *  them via the shared shell command table.  Sends "$ " prompt back
  *  over WiFi after each command (or empty line).
  */
 void wifi_service(void)
@@ -373,6 +405,8 @@ void wifi_service(void)
                     wifi_init(wifi_huart);
                     return;
                 }
+                if (wifi_command_defers_prompt(wifi_cmd_buf))
+                    wifi_defer_prompt();
                 shell_dispatch(wifi_cmd_buf);
                 wifi_cmd_pos = 0;
                 memset(wifi_cmd_buf, 0, sizeof(wifi_cmd_buf));
@@ -380,7 +414,7 @@ void wifi_service(void)
             if (wifi_prompt_deferred)
                 wifi_prompt_deferred = false;
             else
-                wifi_printf("> ");
+                wifi_prompt();
             break;
 
         case SHELL_CHAR_BS:

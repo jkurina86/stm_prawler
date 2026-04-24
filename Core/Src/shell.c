@@ -12,7 +12,6 @@
 #include "tasker.h"
 #include "task_handlers.h"
 #include "config.h"
-#include "wifi.h"
 #include <stdarg.h>
 
 extern UART_HandleTypeDef huart1;
@@ -22,6 +21,7 @@ static char shell_buffer[SHELL_MAX_CMD_LEN];
 static uint16_t shell_buffer_pos = 0;
 static uint8_t shell_rx_char;
 static bool shell_prompt_deferred;
+static bool shell_dispatch_from_wifi;
 
 /* Non-blocking ISR to main RX ring buffer */
 #define SHELL_RX_RING_SIZE 128
@@ -112,24 +112,35 @@ static int shell_parse_command(char *cmd_line, char **argv);
  */
 bool shell_dispatch(char *cmd_line)
 {
+    bool previous_dispatch_from_wifi = shell_dispatch_from_wifi;
+    bool found = false;
     char *argv[SHELL_MAX_ARGS];
+
+    shell_dispatch_from_wifi = true;
+
     int argc = shell_parse_command(cmd_line, argv);
-    if (argc == 0)
-        return true;  /* empty line is not an error */
+    if (argc == 0) {
+        found = true;  /* empty line is not an error */
+        goto done;
+    }
 
     for (int i = 0; shell_commands[i].name != NULL; i++) {
         if (strcmp(argv[0], shell_commands[i].name) == 0) {
             shell_commands[i].function(argc, argv);
-            return true;
+            found = true;
+            goto done;
         }
     }
-    return false;
+
+done:
+    shell_dispatch_from_wifi = previous_dispatch_from_wifi;
+    return found;
 }
 
 void shell_defer_prompt(void)
 {
-    shell_prompt_deferred = true;
-    wifi_defer_prompt();
+    if (!shell_dispatch_from_wifi)
+        shell_prompt_deferred = true;
 }
 
 void shell_resume_rx(void)

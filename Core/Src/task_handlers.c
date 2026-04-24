@@ -538,7 +538,8 @@ void handle_idata(const void *arg)
 void handle_who(const void *arg)
 {
     (void)arg;
-    wifi_printf("%s\r\n> ", DEVICE_SERIAL);
+    wifi_printf("%s\r\n", DEVICE_SERIAL);
+    wifi_prompt();
     shell_printf("%s\r\n", DEVICE_SERIAL);
     shell_print(SHELL_PROMPT);
 }

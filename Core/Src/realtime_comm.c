@@ -193,7 +193,8 @@ void realtime_comm_stream(void)
     /* No_Data case */
     if (data_sent || rt_len == 0) {
         shell_print("[realtime] No_Data\r\n");
-        wifi_printf("No_Data\r\n> ");
+        wifi_printf("No_Data\r\n");
+        wifi_prompt();
         shell_print(SHELL_PROMPT);
         return;
     }
@@ -212,6 +213,7 @@ void realtime_comm_stream(void)
 
     /* Set the data_sent flag */
     data_sent = 1;
+    wifi_prompt();
 
     shell_printf("[realtime] Sent %u bytes (%u-byte CSV)\r\n", sent, rt_len);
     shell_print(SHELL_PROMPT);
