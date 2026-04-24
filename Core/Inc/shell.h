@@ -99,7 +99,6 @@ void cmd_who(int argc, char **argv);
 void cmd_fs_mount(int argc, char **argv);
 void cmd_fs_unmount(int argc, char **argv);
 void cmd_fs_ls(int argc, char **argv);
-void cmd_fs_cat(int argc, char **argv);
 
 #ifdef __cplusplus
 }

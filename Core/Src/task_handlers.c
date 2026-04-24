@@ -32,6 +32,24 @@ extern UART_HandleTypeDef huart5;
 
 /* General Handlers -------------------------------------------------------*/
 
+static const char *sys_mode_name(sys_mode_t mode)
+{
+    switch (mode) {
+    case SYS_MODE_IDLE:
+        return "IDLE";
+    case SYS_MODE_RECORDING:
+        return "RECORDING";
+    case SYS_MODE_FALSE_START:
+        return "FALSE_START";
+    case SYS_MODE_TIMEOUT:
+        return "TIMEOUT";
+    case SYS_MODE_NORMALIZING:
+        return "NORMALIZING";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 /** @brief  Handle the "help" command
   * @param  arg: Pointer to arguments (not used)
   * @retval None
@@ -63,11 +81,10 @@ void handle_clear(const void *arg)
 void handle_status(const void *arg)
 {
     (void)arg;
-    static const char *mode_names[]   = {"IDLE", "RECORDING", "NORMALIZING"};
     static const char *periph_names[] = {"OFF", "READY", "ERROR"};
     static const char *wifi_names[]   = {"OFF", "INIT", "STREAMING", "ERROR"};
 
-    shell_printf("Mode:       %s\r\n", mode_names[g_app.mode]);
+    shell_printf("Mode:       %s\r\n", sys_mode_name(g_app.mode));
     shell_printf("Uptime:     %lu ms\r\n", HAL_GetTick());
     shell_printf("Tasks:      %u pending\r\n", tasker_pending_count());
     shell_printf("SD/FS:      %s\r\n", periph_names[g_app.sd_status]);
@@ -474,31 +491,6 @@ void handle_fs_ls(const void *arg)
     } else if (res != FS_OK) {
         shell_printf("ls failed (err %d)\r\n", res);
     }
-}
-
-/** @brief  Handle the "fs-cat" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_cat(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0') {
-        shell_print("Usage: fs-cat <filename>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_cat(buf->filename, shell_print);
-    if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res == FS_FILE_NOT_FOUND) {
-        shell_printf("File not found: %s\r\n", buf->filename);
-    } else if (res != FS_OK) {
-        shell_printf("cat failed (err %d)\r\n", res);
-    }
-    shell_print("\r\n");
 }
 
 /* WiFi Handlers ----------------------------------------------------------*/

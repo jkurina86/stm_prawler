@@ -12,7 +12,6 @@
 #include "tasker.h"
 #include "task_handlers.h"
 #include "config.h"
-#include "filesystem.h"
 #include "wifi.h"
 #include <stdarg.h>
 
@@ -87,7 +86,6 @@ const shell_command_t shell_commands[] = {
     {"fs-mount", "Mount the file system", cmd_fs_mount},
     {"fs-unmount", "Unmount the file system", cmd_fs_unmount},
     {"fs-ls", "List directory contents", cmd_fs_ls},
-    {"fs-cat", "Read a file", cmd_fs_cat},
 
     /* WiFi Commands */
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
@@ -515,27 +513,6 @@ void cmd_fs_ls(int argc, char **argv)
 {
     (void)argc; (void)argv; /* Unused args */
     tasker_enqueue(handle_fs_ls, NULL, 0);
-}
-
-/**
-  * @brief Schedule a cat task
-  * @param argc: Argument count
-  * @param argv: Arguments (file path)
-  * @retval None
-  */
-void cmd_fs_cat(int argc, char **argv)
-{
-    (void)argc; /* Unused arg */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0'; /* Ensure null-termination */
-    }
-
-    tasker_enqueue(handle_fs_cat, NULL, 0);
 }
 
 /* CTD Commands ---------------------------------------------------*/

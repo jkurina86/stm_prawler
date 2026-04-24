@@ -87,7 +87,6 @@ void handle_who(const void *arg);
 void handle_fs_mount(const void *arg);
 void handle_fs_unmount(const void *arg);
 void handle_fs_ls(const void *arg);
-void handle_fs_cat(const void *arg);
 
 #ifdef __cplusplus
 }
