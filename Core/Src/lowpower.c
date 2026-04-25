@@ -550,7 +550,7 @@ bool lowpower_prepare_for_sleep(void)
         (void)filesystem_unmount();
     }
 
-    /* Keep PB8 dock sense and PC7 RTC interrupt active as wake sources. */
+    /* Keep PB8 dock sense and PB10 RTC interrupt active as wake sources. */
     lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
     lowpower_rtc_spi_down();
     lowpower_sd_spi_down();
@@ -631,7 +631,9 @@ void lowpower_service(void)
     }
 
     HAL_SuspendTick();
-    HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
+    HAL_PWREx_EnterSTOP2Mode(PWR_STOPENTRY_WFI);
+    HAL_IWDG_Refresh(&hiwdg);
+    SystemClock_Config();
     HAL_ResumeTick();
 
     HAL_IWDG_Refresh(&hiwdg);

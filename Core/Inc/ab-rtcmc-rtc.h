@@ -26,8 +26,8 @@ extern "C" {
 #define RTC_CLKOE_PORT     GPIOC
 #define RTC_CLKOUT_PIN     GPIO_PIN_7
 #define RTC_CLKOUT_PORT    GPIOC
-#define RTC_INT_PIN        GPIO_PIN_7
-#define RTC_INT_PORT       GPIOC
+#define RTC_INT_PIN        RTC_INTod_Pin
+#define RTC_INT_PORT       RTC_INTod_GPIO_Port
 #define RTC_CS_PIN         GPIO_PIN_12
 #define RTC_CS_PORT        GPIOB
 

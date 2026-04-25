@@ -159,7 +159,7 @@ RTC_Status_t RTC_Init(void) {
             return status;
         }
 
-        /* Keep CLKOUT disabled; PC7/TIM3 capture is no longer configured. */
+        /* Keep pin 3 in CLKOUT mode so the alternate INT output is disabled. */
         status = RTC_EnableClockOutput(false);
         if (status != RTC_OK) {
             return status;
@@ -630,17 +630,13 @@ RTC_Status_t RTC_EnableClockOutput(bool enable) {
         HAL_GPIO_WritePin(RTC_CLKOE_PORT, RTC_CLKOE_PIN, GPIO_PIN_RESET);
     }
     
-    /* Control CLK/INT bit in Control_1 register */
+    /* Select CLKOUT function on pin 3. CLKOE only controls whether it is driven. */
     uint8_t ctrl1;
     if (RTC_ReadRegister(RTC_REG_CONTROL_1, &ctrl1) != RTC_OK) {
         return RTC_ERROR;
     }
-    
-    if (enable) {
-        ctrl1 |= RTC_CTRL1_CLK_INT;
-    } else {
-        ctrl1 &= ~RTC_CTRL1_CLK_INT;
-    }
+
+    ctrl1 |= RTC_CTRL1_CLK_INT;
     
     return RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
 }

@@ -53,6 +53,7 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
+void SystemClock_Config(void);
 
 /* USER CODE END EFP */
 
@@ -65,13 +66,13 @@ void Error_Handler(void);
 #define PB1_USART2_EN_GPIO_Port GPIOB
 #define SD_PWR_Pin GPIO_PIN_2
 #define SD_PWR_GPIO_Port GPIOB
+#define RTC_INTod_Pin GPIO_PIN_10
+#define RTC_INTod_GPIO_Port GPIOB
+#define RTC_INTod_EXTI_IRQn EXTI15_10_IRQn
 #define SPI2_CS_Pin GPIO_PIN_12
 #define SPI2_CS_GPIO_Port GPIOB
 #define CLK_OE_Pin GPIO_PIN_6
 #define CLK_OE_GPIO_Port GPIOC
-#define CLKOUT_INTod_Pin GPIO_PIN_7
-#define CLKOUT_INTod_GPIO_Port GPIOC
-#define CLKOUT_INTod_EXTI_IRQn EXTI9_5_IRQn
 #define PB4_AUX_SEL_A0_Pin GPIO_PIN_4
 #define PB4_AUX_SEL_A0_GPIO_Port GPIOB
 #define PB5_AUX_SEL_A1_Pin GPIO_PIN_5
