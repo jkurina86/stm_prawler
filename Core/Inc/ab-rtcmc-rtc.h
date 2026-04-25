@@ -26,8 +26,8 @@ extern "C" {
 #define RTC_CLKOE_PORT     GPIOC
 #define RTC_CLKOUT_PIN     GPIO_PIN_7
 #define RTC_CLKOUT_PORT    GPIOC
-#define RTC_INT_PIN        GPIO_PIN_10
-#define RTC_INT_PORT       GPIOB
+#define RTC_INT_PIN        GPIO_PIN_7
+#define RTC_INT_PORT       GPIOC
 #define RTC_CS_PIN         GPIO_PIN_12
 #define RTC_CS_PORT        GPIOB
 
@@ -153,15 +153,16 @@ extern "C" {
 
 /* Data structures -----------------------------------------------------------*/
 
-/* Public date/alarm fields use binary values. The driver converts these values
+/* Public date/alarm fields use binary values. The driver converts active fields
  * to and from the RTC clock/alarm registers, which are BCD-encoded internally.
- * The current driver supports 24-hour mode only. */
+ * Weekday fields are intentionally unused by firmware. The current driver
+ * supports 24-hour mode only. */
 typedef struct {
     uint8_t seconds;    /* 0-59 */
     uint8_t minutes;    /* 0-59 */
     uint8_t hours;      /* 0-23 */
     uint8_t days;       /* 1-31 (day of month) */
-    uint8_t weekdays;   /* 1-7 (1=Sunday) */
+    uint8_t weekdays;   /* Unused; ignored by firmware */
     uint8_t months;     /* 1-12 */
     uint8_t years;      /* 0-79 (2000-2079) */
     bool is_12h_format; /* Reserved for future 12h support; currently false */
@@ -173,14 +174,14 @@ typedef struct {
     uint8_t minutes;     /* 0-59 */
     uint8_t hours;       /* 0-23 */
     uint8_t days;        /* 1-31 (day of month) */
-    uint8_t weekdays;    /* 1=Sunday to 7=Saturday */
+    uint8_t weekdays;    /* Unused; ignored by firmware */
     uint8_t months;      /* 1-12 */
     uint8_t years;       /* 0-79 (2000-2079) */
     bool seconds_enable; /* Enable seconds alarm */
     bool minutes_enable; /* Enable minutes alarm */
     bool hours_enable;   /* Enable hours alarm */
     bool days_enable;    /* Enable days alarm */
-    bool weekdays_enable;/* Enable weekdays alarm */
+    bool weekdays_enable;/* Unused; weekday alarm matching is always disabled */
     bool months_enable;  /* Enable months alarm */
     bool years_enable;   /* Enable years alarm */
 } RTC_ExtendedAlarm_t;

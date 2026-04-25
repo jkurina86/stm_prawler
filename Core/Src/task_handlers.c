@@ -106,7 +106,7 @@ void handle_status(const void *arg)
     shell_printf("Sensors:    level %u\r\n", g_app.sensor_level);
 }
 
-void handle_low_power_on(const void *arg)
+void handle_lowpower(const void *arg)
 {
     (void)arg;
 
@@ -123,7 +123,7 @@ void handle_low_power_on(const void *arg)
         return;
     }
 
-    shell_print("[lowpower] Sleep requested\r\n");
+    shell_print("[lowpower] Forced sleep requested\r\n");
 }
 
 /** @brief  Handle the "version" command
@@ -175,9 +175,8 @@ void handle_rtc_settime(const void *arg)
     const rtc_settime_args_t *a = (const rtc_settime_args_t *)arg;
 
     if (!a->valid) {
-        shell_print("Usage: rtc-settime YYYY MM DD HH MM SS WD\r\n");
+        shell_print("Usage: rtc-settime YYYY MM DD HH MM SS\r\n");
         shell_print("  YYYY = 2000..2079\r\n");
-        shell_print("  WD = weekday (1=Sun..7=Sat)\r\n");
         return;
     }
 
@@ -193,7 +192,6 @@ void handle_rtc_settime(const void *arg)
     dt.hours    = a->hours;
     dt.minutes  = a->minutes;
     dt.seconds  = a->seconds;
-    dt.weekdays = a->weekdays;
 
     bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_SetDateTime(&dt);
@@ -220,9 +218,9 @@ void handle_rtc_gettime(const void *arg)
     RTC_Status_t status = RTC_GetDateTime(&dt);
     lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
-        shell_printf("20%02u-%02u-%02u %02u:%02u:%02u (wd=%u)\r\n",
+        shell_printf("20%02u-%02u-%02u %02u:%02u:%02u\r\n",
                      dt.years, dt.months, dt.days,
-                     dt.hours, dt.minutes, dt.seconds, dt.weekdays);
+                     dt.hours, dt.minutes, dt.seconds);
     } else {
         shell_printf("RTC read failed (err %d)\r\n", status);
     }

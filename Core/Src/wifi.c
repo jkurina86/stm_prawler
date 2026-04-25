@@ -17,6 +17,7 @@
 
 #include "wifi.h"
 #include "config.h"
+#include "lowpower.h"
 #include "shell.h"
 #include <string.h>
 #include <stdio.h>
@@ -109,6 +110,7 @@ static void wifi_defer_prompt(void)
 
 void wifi_notify_rx_cplt(void)
 {
+    lowpower_note_activity();
     wifi_rx_count++;
     rb_push(rx_byte);
     HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);

@@ -57,7 +57,7 @@ void shell_resume_rx(void);
 void cmd_help(int argc, char **argv);
 void cmd_clear(int argc, char **argv);
 void cmd_status(int argc, char **argv);
-void cmd_low_power_on(int argc, char **argv);
+void cmd_lowpower(int argc, char **argv);
 void cmd_pb8(int argc, char **argv);
 void cmd_version(int argc, char **argv);
 /* RTC Command functions */

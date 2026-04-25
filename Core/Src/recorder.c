@@ -96,13 +96,13 @@ static void return_to_idle(void)
     __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
     g_app.start_flag = false;
     state = REC_IDLE;
-    g_app.mode = SYS_MODE_IDLE;
     start_time = 0;
     bringup_tick = 0;
     debounce_active = false;
 
     lowpower_profile_peripherals_down();
     lowpower_wifi_start();
+    lowpower_enter_idle();
 }
 
 static int format_measurement_csv(char *buf, size_t buf_size,

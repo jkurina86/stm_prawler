@@ -23,7 +23,6 @@ typedef struct {
     uint8_t hours;
     uint8_t minutes;
     uint8_t seconds;
-    uint8_t weekdays;
     uint8_t valid;
 } rtc_settime_args_t;
 
@@ -46,7 +45,7 @@ typedef struct {
 void handle_help(const void *arg);
 void handle_clear(const void *arg);
 void handle_status(const void *arg);
-void handle_low_power_on(const void *arg);
+void handle_lowpower(const void *arg);
 void handle_version(const void *arg);
 /* RTC */
 void handle_settime(const void *arg);

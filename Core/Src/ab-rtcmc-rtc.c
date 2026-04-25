@@ -164,6 +164,7 @@ RTC_Status_t RTC_Init(void) {
         if (status != RTC_OK) {
             return status;
         }
+
     } else {
         return status;
     }
@@ -275,7 +276,7 @@ RTC_Status_t RTC_SetDateTime(RTC_DateTime_t* datetime) {
 
     /* Validate input parameters */
     if (datetime->seconds > 59 || datetime->minutes > 59 ||
-        datetime->hours > 23 || datetime->weekdays > 7 || datetime->weekdays == 0 ||
+        datetime->hours > 23 ||
         datetime->days > 31 || datetime->days == 0 ||
         datetime->months > 12 || datetime->months == 0 ||
         datetime->years > 79) {
@@ -307,7 +308,6 @@ RTC_Status_t RTC_SetDateTime(RTC_DateTime_t* datetime) {
 
     status |= RTC_WriteRegister(RTC_REG_HOURS, hours);
     status |= RTC_WriteRegister(RTC_REG_DAYS, RTC_Bin2BCD(datetime->days));
-    status |= RTC_WriteRegister(RTC_REG_WEEKDAYS, RTC_Bin2BCD(datetime->weekdays));
     status |= RTC_WriteRegister(RTC_REG_MONTHS, RTC_Bin2BCD(datetime->months));
     status |= RTC_WriteRegister(RTC_REG_YEARS, RTC_Bin2BCD(datetime->years));
 
@@ -346,7 +346,7 @@ if (datetime == NULL) {
     datetime->hours = RTC_BCD2Bin(hours_reg & 0x3F);    /* 24-hour format, mask with 0011 1111 */
 
     datetime->days = RTC_BCD2Bin(regs[3] & 0x3F);        /* Day of month, mask with 0011 1111 (tens: 0-3) and (ones: 0-9)*/
-    datetime->weekdays = RTC_BCD2Bin(regs[4] & 0x07);    /* Day of week,  mask with 0000 0111 (ones: 1-7) */
+    datetime->weekdays = 0;                               /* Weekdays are unused by firmware. */
     datetime->months = RTC_BCD2Bin(regs[5] & 0x1F);      /* Month, mask with 0001 1111 (tens: 0-1) and (ones: 0-9) */
     datetime->years = RTC_BCD2Bin(regs[6] & 0x7F);       /* Year, mask with 0111 1111 (tens: 0-7) and (ones: 0-9) */
     
@@ -665,7 +665,6 @@ RTC_Status_t RTC_SetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
 
     if (alarm->seconds > 59 || alarm->minutes > 59 ||
         alarm->hours > 23 || alarm->days > 31 || alarm->days == 0 ||
-        alarm->weekdays > 7 || alarm->weekdays == 0 ||
         alarm->months > 12 || alarm->months == 0 ||
         alarm->years > 79) {
         return RTC_INVALID_PARAM;
@@ -677,7 +676,7 @@ RTC_Status_t RTC_SetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     uint8_t hour_reg = RTC_Bin2BCD(alarm->hours);
     uint8_t day_reg = RTC_Bin2BCD(alarm->days);
     uint8_t month_reg = RTC_Bin2BCD(alarm->months);
-    uint8_t weekday_reg = RTC_Bin2BCD(alarm->weekdays);
+    uint8_t weekday_reg = 0;
     uint8_t year_reg = RTC_Bin2BCD(alarm->years);
 
     RTC_Status_t status = RTC_OK;
@@ -687,7 +686,6 @@ RTC_Status_t RTC_SetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     if (alarm->minutes_enable) { min_reg |= RTC_ALARM_ENABLE; }
     if (alarm->hours_enable) { hour_reg |= RTC_ALARM_ENABLE; }
     if (alarm->days_enable) { day_reg |= RTC_ALARM_ENABLE; }
-    if (alarm->weekdays_enable) { weekday_reg |= RTC_ALARM_ENABLE; }
     if (alarm->months_enable) { month_reg |= RTC_ALARM_ENABLE; }
     if (alarm->years_enable) { year_reg |= RTC_ALARM_ENABLE; }
 
@@ -725,7 +723,7 @@ RTC_Status_t RTC_GetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     alarm->minutes = RTC_BCD2Bin(regs[1] & 0x7F);
     alarm->hours = RTC_BCD2Bin(regs[2] & 0x3F);
     alarm->days = RTC_BCD2Bin(regs[3] & 0x3F);
-    alarm->weekdays = RTC_BCD2Bin(regs[4] & 0x07);
+    alarm->weekdays = 0;
     alarm->months = RTC_BCD2Bin(regs[5] & 0x1F);
     alarm->years = RTC_BCD2Bin(regs[6] & 0x7F);
 
@@ -734,7 +732,7 @@ RTC_Status_t RTC_GetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     alarm->minutes_enable = (regs[1] & RTC_ALARM_ENABLE) ? true : false;
     alarm->hours_enable = (regs[2] & RTC_ALARM_ENABLE) ? true : false;
     alarm->days_enable = (regs[3] & RTC_ALARM_ENABLE) ? true : false;
-    alarm->weekdays_enable = (regs[4] & RTC_ALARM_ENABLE) ? true : false;
+    alarm->weekdays_enable = false;
     alarm->months_enable = (regs[5] & RTC_ALARM_ENABLE) ? true : false;
     alarm->years_enable = (regs[6] & RTC_ALARM_ENABLE) ? true : false;
     
@@ -1171,8 +1169,7 @@ void RTC_FromUnixEpoch(uint32_t unix_epoch, RTC_DateTime_t *dt)
     dt->minutes = (uint8_t)((secs % 3600) / 60);
     dt->seconds = (uint8_t)(secs % 60);
 
-    /* Jan 1 1970 was a Thursday (weekday 5 in 1=Sun convention) */
-    dt->weekdays = (uint8_t)((days + 4) % 7 + 1);
+    dt->weekdays = 0; /* Weekdays are unused by firmware. */
 
     /* Walk years from 1970 */
     uint16_t year = 1970;

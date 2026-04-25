@@ -12,6 +12,7 @@
 #include "tasker.h"
 #include "task_handlers.h"
 #include "config.h"
+#include "lowpower.h"
 #include <stdarg.h>
 
 extern UART_HandleTypeDef huart1;
@@ -52,7 +53,7 @@ const shell_command_t shell_commands[] = {
     {"help", "Display available commands", cmd_help},
     {"clear", "Clear terminal screen", cmd_clear},
     {"status", "Show system status", cmd_status},
-    {"low-power-on", "Enter low-power sleep mode", cmd_low_power_on},
+    {"lowpower", "Force low-power sleep mode", cmd_lowpower},
     {"pb8", "Show PB8 pin state", cmd_pb8},
     {"version", "Show firmware version", cmd_version},
 
@@ -358,12 +359,12 @@ void cmd_status(int argc, char **argv)
     tasker_enqueue(handle_status, NULL, 0);
 }
 
-void cmd_low_power_on(int argc, char **argv)
+void cmd_lowpower(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
     shell_defer_prompt();
-    if (!tasker_enqueue(handle_low_power_on, NULL, 0)) {
+    if (!tasker_enqueue(handle_lowpower, NULL, 0)) {
         shell_print("Task queue full\r\n");
         shell_print(SHELL_PROMPT);
     }
@@ -399,7 +400,7 @@ void cmd_settime(int argc, char **argv)
 /**
   * @brief Set RTC date and time
   * @param argc: Argument count
-  * @param argv: Arguments (YYYY MM DD HH MM SS WD)
+  * @param argv: Arguments (YYYY MM DD HH MM SS)
   * @retval None
   */
 void cmd_rtc_settime(int argc, char **argv)
@@ -407,14 +408,13 @@ void cmd_rtc_settime(int argc, char **argv)
     /* Parse arguments and schedule RTC settime task */
     rtc_settime_args_t args = {0};
     
-    if (argc >= 8 && argv != NULL) {
+    if (argc >= 7 && argv != NULL) {
         args.year = (uint16_t)atoi(argv[1]);
         args.months = (uint8_t)atoi(argv[2]);
         args.days = (uint8_t)atoi(argv[3]);
         args.hours = (uint8_t)atoi(argv[4]);
         args.minutes = (uint8_t)atoi(argv[5]);
         args.seconds = (uint8_t)atoi(argv[6]);
-        args.weekdays = (uint8_t)atoi(argv[7]);
         args.valid = 1;
     }
     
@@ -628,6 +628,7 @@ void cmd_who(int argc, char **argv)
 void shell_uart_receive_callback(void)
 {
     /* Enqueue received byte and do all parsing/printing in main with shell_task() */
+    lowpower_note_activity();
     shell_rx_enqueue(shell_rx_char);
     HAL_UART_Receive_IT(&huart1, &shell_rx_char, 1);
 }

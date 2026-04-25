@@ -13,6 +13,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Individual peripheral / pin-group helpers --------------------------------*/
 void lowpower_shell_uart_down(void);
@@ -38,6 +39,9 @@ void lowpower_rtc_spi_up(void);
 
 /* Aggregated low-power flow -------------------------------------------------*/
 void lowpower_init(void);
+void lowpower_enter_idle(void);
+void lowpower_note_activity(void);
+uint32_t lowpower_idle_elapsed_ms(void);
 void lowpower_idle_peripherals_down(void);
 void lowpower_profile_peripherals_up(void);
 void lowpower_profile_peripherals_down(void);
@@ -49,7 +53,7 @@ void lowpower_wifi_stop(void);
 bool lowpower_request_on(void);
 void lowpower_service(void);
 bool lowpower_is_pending(void);
-void lowpower_prepare_for_sleep(void);
+bool lowpower_prepare_for_sleep(void);
 void lowpower_restore_from_sleep(void);
 
 #ifdef __cplusplus

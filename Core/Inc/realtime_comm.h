@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 #include "profile_data.h"
+#include <stdbool.h>
 
 /* Build the realtime CSV payload into the module-internal RAM2 buffer and
  * cache the frame metadata.
@@ -42,6 +43,9 @@ void realtime_comm_build(const profile_data_t *profile);
 
 /* Send the pre-built realtime frame to the connected WiFi TCP client. */
 void realtime_comm_stream(void);
+
+/* True while a built realtime profile is waiting to be sent. */
+bool realtime_comm_data_pending(void);
 
 #ifdef __cplusplus
 }

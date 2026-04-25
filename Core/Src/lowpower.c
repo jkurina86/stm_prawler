@@ -7,16 +7,22 @@
 
 #include "lowpower.h"
 
+#include "ab-rtcmc-rtc.h"
 #include "config.h"
 #include "ctd.h"
 #include "filesystem.h"
 #include "main.h"
 #include "optode.h"
+#include "realtime_comm.h"
 #include "shell.h"
+#include "tasker.h"
 #include "wetlab.h"
 #include "wifi.h"
 
 #include <string.h>
+
+#define LOWPOWER_IDLE_TIMEOUT_MS 60000UL
+#define LOWPOWER_RTC_WAKE_SECONDS 25UL
 
 /* External peripheral handles declared in main.c ---------------------------*/
 extern SPI_HandleTypeDef hspi1;
@@ -26,6 +32,7 @@ extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
 extern UART_HandleTypeDef huart4;
 extern UART_HandleTypeDef huart5;
+extern IWDG_HandleTypeDef hiwdg;
 
 typedef struct {
     bool pending;
@@ -35,6 +42,8 @@ typedef struct {
     bool wifi_was_enabled;
     bool profile_peripherals_up;
     bool profile_peripherals_were_up;
+    volatile bool idle_timer_active;
+    volatile uint32_t idle_started_tick;
 } lowpower_state_t;
 
 static lowpower_state_t g_lowpower_state;
@@ -79,6 +88,73 @@ static void lowpower_unmount_filesystem(void)
     if (filesystem_is_mounted()) {
         (void)filesystem_unmount();
     }
+}
+
+static RTC_Status_t lowpower_program_rtc_wake_alarm(void)
+{
+    RTC_DateTime_t now = {0};
+    RTC_DateTime_t wake = {0};
+    RTC_ExtendedAlarm_t alarm = {0};
+    RTC_Status_t status;
+    bool release_spi = lowpower_rtc_begin();
+
+    status = RTC_EnableAlarm(false);
+    if (status == RTC_OK) {
+        status = RTC_ClearAlarmFlag();
+    }
+    RTC_ClearPendingInterrupt();
+    __HAL_GPIO_EXTI_CLEAR_IT(RTC_INT_PIN);
+
+    if (status == RTC_OK) {
+        status = RTC_GetDateTime(&now);
+    }
+
+    if (status == RTC_OK) {
+        uint32_t wake_epoch = RTC_ToUnixEpoch(&now) + LOWPOWER_RTC_WAKE_SECONDS;
+        RTC_FromUnixEpoch(wake_epoch, &wake);
+
+        alarm.seconds = wake.seconds;
+        alarm.minutes = wake.minutes;
+        alarm.hours = wake.hours;
+        alarm.days = wake.days;
+        alarm.months = wake.months;
+        alarm.years = wake.years;
+        alarm.seconds_enable = true;
+        alarm.minutes_enable = true;
+        alarm.hours_enable = true;
+        alarm.days_enable = true;
+        alarm.months_enable = true;
+        alarm.years_enable = true;
+
+        status = RTC_SetExtendedAlarm(&alarm);
+    }
+
+    if (status == RTC_OK) {
+        status = RTC_ClearAlarmFlag();
+    }
+    if (status == RTC_OK) {
+        status = RTC_EnableAlarm(true);
+    }
+
+    RTC_ClearPendingInterrupt();
+    __HAL_GPIO_EXTI_CLEAR_IT(RTC_INT_PIN);
+    lowpower_rtc_end(release_spi);
+    return status;
+}
+
+static RTC_Status_t lowpower_clear_rtc_wake_alarm(void)
+{
+    bool release_spi = lowpower_rtc_begin();
+    RTC_Status_t status = RTC_EnableAlarm(false);
+
+    if (status == RTC_OK) {
+        status = RTC_ClearAlarmFlag();
+    }
+
+    RTC_ClearPendingInterrupt();
+    __HAL_GPIO_EXTI_CLEAR_IT(RTC_INT_PIN);
+    lowpower_rtc_end(release_spi);
+    return status;
 }
 
 /* Individual peripheral / pin-group helpers -------------------------------*/
@@ -321,6 +397,27 @@ void lowpower_init(void)
     memset(&g_lowpower_state, 0, sizeof(g_lowpower_state));
 }
 
+void lowpower_enter_idle(void)
+{
+    g_app.mode = SYS_MODE_IDLE;
+    lowpower_note_activity();
+}
+
+void lowpower_note_activity(void)
+{
+    g_lowpower_state.idle_started_tick = HAL_GetTick();
+    g_lowpower_state.idle_timer_active = true;
+}
+
+uint32_t lowpower_idle_elapsed_ms(void)
+{
+    if (!g_lowpower_state.idle_timer_active) {
+        return 0;
+    }
+
+    return HAL_GetTick() - g_lowpower_state.idle_started_tick;
+}
+
 void lowpower_idle_peripherals_down(void)
 {
     lowpower_unmount_filesystem();
@@ -409,10 +506,30 @@ bool lowpower_is_pending(void)
     return g_lowpower_state.pending;
 }
 
-void lowpower_prepare_for_sleep(void)
+static bool lowpower_idle_timeout_due(void)
+{
+    if (!g_lowpower_state.idle_timer_active ||
+        g_lowpower_state.pending ||
+        g_lowpower_state.prepared ||
+        g_lowpower_state.profile_peripherals_up ||
+        g_app.mode != SYS_MODE_IDLE ||
+        g_app.start_flag ||
+        tasker_pending_count() != 0) {
+        return false;
+    }
+
+    if (realtime_comm_data_pending()) {
+        lowpower_note_activity();
+        return false;
+    }
+
+    return lowpower_idle_elapsed_ms() >= LOWPOWER_IDLE_TIMEOUT_MS;
+}
+
+bool lowpower_prepare_for_sleep(void)
 {
     if (g_lowpower_state.prepared) {
-        return;
+        return true;
     }
 
     g_lowpower_state.filesystem_was_mounted = filesystem_is_mounted();
@@ -420,11 +537,20 @@ void lowpower_prepare_for_sleep(void)
     g_lowpower_state.wifi_was_enabled = (wifi_get_state() != WIFI_STATE_OFF);
     g_lowpower_state.profile_peripherals_were_up = g_lowpower_state.profile_peripherals_up;
 
+    RTC_Status_t rtc_status = lowpower_program_rtc_wake_alarm();
+    if (rtc_status != RTC_OK) {
+        shell_printf("[lowpower] RTC wake alarm setup failed (err=%d)\r\n",
+                     rtc_status);
+        return false;
+    }
+
+    HAL_IWDG_Refresh(&hiwdg);
+
     if (g_lowpower_state.filesystem_was_mounted) {
         (void)filesystem_unmount();
     }
 
-    /* Keep PB8 dock sense and PB10 RTC interrupt active as wake sources. */
+    /* Keep PB8 dock sense and PC7 RTC interrupt active as wake sources. */
     lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
     lowpower_rtc_spi_down();
     lowpower_sd_spi_down();
@@ -436,6 +562,7 @@ void lowpower_prepare_for_sleep(void)
 
     g_lowpower_state.profile_peripherals_up = false;
     g_lowpower_state.prepared = true;
+    return true;
 }
 
 void lowpower_restore_from_sleep(void)
@@ -485,6 +612,11 @@ void lowpower_restore_from_sleep(void)
 
 void lowpower_service(void)
 {
+    if (!g_lowpower_state.pending && lowpower_idle_timeout_due()) {
+        g_lowpower_state.pending = true;
+        shell_print("[lowpower] Idle timeout reached\r\n");
+    }
+
     if (!g_lowpower_state.pending) {
         return;
     }
@@ -492,14 +624,33 @@ void lowpower_service(void)
     g_lowpower_state.pending = false;
 
     shell_print("[lowpower] Preparing peripherals for sleep...\r\n");
-    lowpower_prepare_for_sleep();
+    if (!lowpower_prepare_for_sleep()) {
+        lowpower_enter_idle();
+        shell_print(SHELL_PROMPT);
+        return;
+    }
 
     HAL_SuspendTick();
     HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
     HAL_ResumeTick();
 
+    HAL_IWDG_Refresh(&hiwdg);
+
+    bool rtc_wake = RTC_IsInterruptPending() || RTC_IsInterruptAsserted();
+    if (rtc_wake) {
+        (void)lowpower_clear_rtc_wake_alarm();
+    }
+
     lowpower_restore_from_sleep();
 
-    shell_print("[lowpower] Woke from sleep.\r\n");
-    shell_print(SHELL_PROMPT);
+    if (g_app.start_flag) {
+        lowpower_note_activity();
+        shell_print("\r\n");
+    } else if (rtc_wake) {
+        lowpower_enter_idle();
+    } else {
+        lowpower_enter_idle();
+        shell_print("[lowpower] Woke from sleep.\r\n");
+        shell_print(SHELL_PROMPT);
+    }
 }

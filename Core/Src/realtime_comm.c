@@ -12,6 +12,7 @@
 #include "realtime_comm.h"
 #include "wifi.h"
 #include "shell.h"
+#include "lowpower.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -89,6 +90,7 @@ void realtime_comm_build(const profile_data_t *profile)
     rt_len = 0;
     rt_crc = 0;
     data_sent = 0;
+    lowpower_note_activity();
 
     /* Create the header based on sensor configuration */
     int n;
@@ -213,8 +215,14 @@ void realtime_comm_stream(void)
 
     /* Set the data_sent flag */
     data_sent = 1;
+    lowpower_note_activity();
     wifi_prompt();
 
     shell_printf("[realtime] Sent %u bytes (%u-byte CSV)\r\n", sent, rt_len);
     shell_print(SHELL_PROMPT);
+}
+
+bool realtime_comm_data_pending(void)
+{
+    return data_sent == 0;
 }
