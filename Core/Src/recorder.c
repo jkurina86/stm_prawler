@@ -2,10 +2,10 @@
   ******************************************************************************
   * @file    recorder.c
   * @brief   PB8-triggered sensor logging with in-RAM buffering.
-  * @note    On PB8 rising edge, powers down the SD card and buffers every
-  *          sample into a static profile_data_t in RAM. When normalization
-  *          finishes (or a false start is detected), the SD is re-powered,
-  *          re-mounted, and the entire CSV is written in a single pass.
+  * @note    On PB8 rising edge, brings up the profile sensor path, powers
+  *          WiFi down, and buffers every sample into a static profile_data_t.
+  *          When normalization finishes, the SD is mounted only long enough
+  *          to write the CSV, then the idle power policy is restored.
   ******************************************************************************
   */
 
@@ -17,11 +17,10 @@
 #include "sensors.h"
 #include "profile_data.h"
 #include "realtime_comm.h"
-#include "wifi.h"
+#include "lowpower.h"
 #include "stm32l4xx_hal.h"
 #include "config.h"
 
-extern UART_HandleTypeDef huart4;
 #include <string.h>
 #include <stdio.h>
 
@@ -32,11 +31,12 @@ extern UART_HandleTypeDef huart4;
 #define NORM_INTERVAL         20000 /* ms between normalization samples */
 #define NORM_SAMPLES          PROFILE_NORM_SAMPLES
 #define DEBOUNCE_MS           100   /* PB8 debounce period */
-#define SD_POWER_ON_DELAY_MS  50    /* Settling delay after SD_PWR_Pin HIGH */
+#define PROFILE_BRINGUP_MS    3000  /* Instrument bringup before sampling */
 
 /* Private types -------------------------------------------------------------*/
 typedef enum {
     REC_IDLE,
+    REC_BRINGUP,
     REC_RECORDING,
     REC_TIMEOUT,
     REC_NORMALIZING
@@ -51,6 +51,7 @@ static float initial_depth = 0.0f;
 static float max_pressure;
 static uint16_t sample_count;
 static uint32_t next_sample_tick;
+static uint32_t bringup_tick;
 static char rec_filename[32];
 static char last_successful_filename[32];
 
@@ -64,30 +65,29 @@ static bool     debounce_active;
 static uint32_t get_unix_timestamp(void)
 {
     RTC_DateTime_t dt = {0};
-    if (RTC_GetDateTime(&dt) != RTC_OK) {
+    bool release_spi = lowpower_rtc_begin();
+    RTC_Status_t status = RTC_GetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
+
+    if (status != RTC_OK) {
         return 0;
     }
     return RTC_ToUnixEpoch(&dt);
 }
 
-static void sd_power_off(void)
+static bool sd_mount_for_flush(void)
 {
-    if (filesystem_is_mounted()) {
-        filesystem_unmount();
-    }
-    HAL_GPIO_WritePin(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_RESET);
-}
-
-static bool sd_power_on_and_mount(void)
-{
-    HAL_GPIO_WritePin(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
-    HAL_Delay(SD_POWER_ON_DELAY_MS);
+    lowpower_sd_spi_up();
 
     FS_Result_t res = filesystem_mount();
     if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
         shell_printf("[recorder] Mount failed (err=%d)\r\n", res);
+        g_app.sd_status = PERIPH_ERROR;
+        lowpower_sd_spi_down();
         return false;
     }
+
+    g_app.sd_status = PERIPH_READY;
     return true;
 }
 
@@ -98,10 +98,11 @@ static void return_to_idle(void)
     state = REC_IDLE;
     g_app.mode = SYS_MODE_IDLE;
     start_time = 0;
+    bringup_tick = 0;
     debounce_active = false;
 
-    /* Restore WiFi that was brought down when the profile started. */
-    wifi_init(&huart4);
+    lowpower_profile_peripherals_down();
+    lowpower_wifi_start();
 }
 
 static int format_measurement_csv(char *buf, size_t buf_size,
@@ -279,13 +280,36 @@ void recorder_service(void)
                 break;
             debounce_active = false;
 
-            /* Start a new profile: reset buffer, capture start time, bring
-             * WiFi down, power SD off. WiFi is restored in return_to_idle(). */
             g_profile.count = 0;
             g_profile.sensor_level = g_app.sensor_level;
+            g_profile.start_epoch = 0;
+            sample_count = 0;
+            start_time = 0;
+            initial_depth = 0.0f;
+            max_pressure = 0.0f;
+
+            lowpower_profile_peripherals_up();
+            bringup_tick = HAL_GetTick();
+            state = REC_BRINGUP;
+            g_app.mode = SYS_MODE_RECORDING;
+            shell_printf("[recorder] Profile peripherals up; waiting %u ms\r\n",
+                         PROFILE_BRINGUP_MS);
+        }
+        break;
+
+    case REC_BRINGUP:
+        if (g_app.start_flag)
+            g_app.start_flag = false;
+
+        if (pb8_low_debounced()) {
+            shell_print("[recorder] PB8 LOW during bringup; recording canceled\r\n");
+            return_to_idle();
+            return;
+        }
+
+        if ((HAL_GetTick() - bringup_tick) >= PROFILE_BRINGUP_MS) {
+            debounce_active = false;
             g_profile.start_epoch = get_unix_timestamp();
-            wifi_down();
-            sd_power_off();
 
             shell_printf("[recorder] Started (SD powered off, buffering in RAM)\r\n");
 
@@ -300,7 +324,6 @@ void recorder_service(void)
             max_pressure = reading.ctd.pressure;
 
             state = REC_RECORDING;
-            g_app.mode = SYS_MODE_RECORDING;
         }
         break;
 
@@ -326,9 +349,6 @@ void recorder_service(void)
                     if (max_pressure <= initial_depth + TOLERANCE) {
                         /* No significant descent — discard in-RAM buffer. */
                         g_profile.count = 0;
-                        if (!sd_power_on_and_mount()) {
-                            shell_print("[recorder] SD restore failed after false start\r\n");
-                        }
                         shell_print("[recorder] False start — recording discarded\r\n");
                         return_to_idle();
                         return;
@@ -378,7 +398,7 @@ void recorder_service(void)
                 realtime_comm_build(&g_profile);
 
                 /* Done sampling — power SD back up and flush the profile. */
-                if (!sd_power_on_and_mount()) {
+                if (!sd_mount_for_flush()) {
                     shell_print("[recorder] Profile data lost: SD restore failed\r\n");
                     return_to_idle();
                     return;

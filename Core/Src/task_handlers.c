@@ -50,6 +50,16 @@ static const char *sys_mode_name(sys_mode_t mode)
     }
 }
 
+static bool sensor_shell_peripherals_available(void)
+{
+    if (lowpower_profile_peripherals_are_up()) {
+        return true;
+    }
+
+    shell_print("[power] Sensor peripherals are off in idle; PB8 profile start owns sensor power\r\n");
+    return false;
+}
+
 /** @brief  Handle the "help" command
   * @param  arg: Pointer to arguments (not used)
   * @retval None
@@ -100,6 +110,13 @@ void handle_low_power_on(const void *arg)
 {
     (void)arg;
 
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[lowpower] Sleep is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
+        shell_print(SHELL_PROMPT);
+        return;
+    }
+
     if (!lowpower_request_on()) {
         shell_print("[lowpower] Sleep request already pending\r\n");
         shell_print(SHELL_PROMPT);
@@ -137,7 +154,9 @@ void handle_settime(const void *arg)
     RTC_DateTime_t dt = {0};
     RTC_FromUnixEpoch(a->unix_epoch, &dt);
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_SetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
         shell_printf("RTC set to 20%02u-%02u-%02u %02u:%02u:%02u\r\n",
                      dt.years, dt.months, dt.days,
@@ -176,7 +195,9 @@ void handle_rtc_settime(const void *arg)
     dt.seconds  = a->seconds;
     dt.weekdays = a->weekdays;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_SetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
         shell_printf("RTC set to 20%02u-%02u-%02u %02u:%02u:%02u\r\n",
                      dt.years, dt.months, dt.days,
@@ -195,7 +216,9 @@ void handle_rtc_gettime(const void *arg)
     (void)arg;
     RTC_DateTime_t dt = {0};
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_GetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
         shell_printf("20%02u-%02u-%02u %02u:%02u:%02u (wd=%u)\r\n",
                      dt.years, dt.months, dt.days,
@@ -214,7 +237,9 @@ void handle_rtc_temp(const void *arg)
     (void)arg;
     int8_t temp;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_GetTemperature(&temp);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
         shell_printf("RTC temperature: %d C\r\n", temp);
     } else {
@@ -241,10 +266,12 @@ void handle_rtc_timer_set(const void *arg)
     timer.auto_reload = false;
     timer.enabled     = true;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_SetTimer(&timer);
     if (status == RTC_OK) {
         status = RTC_EnableTimerInterrupt(true);
     }
+    lowpower_rtc_end(release_spi);
 
     if (status == RTC_OK) {
         shell_printf("RTC timer set to %u s\r\n", a->seconds);
@@ -261,6 +288,7 @@ void handle_rtc_timer_stop(const void *arg)
 {
     (void)arg;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_EnableTimer(false);
     if (status == RTC_OK) {
         status = RTC_EnableTimerInterrupt(false);
@@ -268,6 +296,7 @@ void handle_rtc_timer_stop(const void *arg)
     if (status == RTC_OK) {
         status = RTC_ClearTimerFlag();
     }
+    lowpower_rtc_end(release_spi);
 
     if (status == RTC_OK) {
         shell_print("RTC timer stopped\r\n");
@@ -285,14 +314,20 @@ void handle_rtc_timer_status(const void *arg)
     (void)arg;
 
     RTC_Timer_t timer = {0};
+    bool triggered = false;
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_GetTimer(&timer);
+    if (status == RTC_OK) {
+        triggered = RTC_IsTimerTriggered();
+    }
+    lowpower_rtc_end(release_spi);
 
     if (status == RTC_OK) {
         shell_printf("Timer: %s, value=%u, auto-reload=%s, triggered=%s\r\n",
                      timer.enabled ? "ON" : "OFF",
                      timer.timer_value,
                      timer.auto_reload ? "yes" : "no",
-                     RTC_IsTimerTriggered() ? "yes" : "no");
+                     triggered ? "yes" : "no");
     } else {
         shell_printf("RTC timer status failed (err %d)\r\n", status);
     }
@@ -307,6 +342,9 @@ void handle_rtc_timer_status(const void *arg)
 void handle_ctd(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     ctd_data_t data;
     if (ctd_ts(&data)) {
         shell_print("\nCTD Sensor Readings:\r\n");
@@ -323,6 +361,9 @@ void handle_ctd(const void *arg)
 void handle_optode(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     optode_data_t data;
     if (optode_sample(&data)) {
         shell_printf("\nOptode:\r\n");
@@ -343,6 +384,9 @@ void handle_optode(const void *arg)
 void handle_optode_listen(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     optode_listen();
 }
 
@@ -351,6 +395,9 @@ void handle_optode_listen(const void *arg)
 void handle_wetlab(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     wetlab_data_t data;
     if (wetlab_sample(&data)) {
         shell_print("\nWetLab:\r\n");
@@ -369,6 +416,9 @@ void handle_wetlab(const void *arg)
 void handle_wetlab_raw(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     wetlab_raw();
 }
 
@@ -377,6 +427,9 @@ void handle_wetlab_raw(const void *arg)
 void handle_sensors(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     bool has_optode = config_has_optode();
     bool has_wetlab = config_has_wetlab();
 
@@ -449,16 +502,27 @@ void handle_config(const void *arg)
 void handle_fs_mount(const void *arg)
 {
     (void)arg;
+
+    if (lowpower_profile_peripherals_are_up()) {
+        shell_print("[fs] SD access is unavailable during a profile\r\n");
+        return;
+    }
+
+    lowpower_sd_spi_up();
     FS_Result_t res = filesystem_mount();
     switch (res) {
         case FS_OK:
+            g_app.sd_status = PERIPH_READY;
             shell_print("File system mounted\r\n");
             break;
         case FS_ALREADY_MOUNTED:
+            g_app.sd_status = PERIPH_READY;
             shell_print("File system already mounted\r\n");
             break;
         default:
+            g_app.sd_status = PERIPH_ERROR;
             shell_printf("Mount failed (err %d)\r\n", res);
+            lowpower_sd_spi_down();
             break;
     }
 }
@@ -482,6 +546,8 @@ void handle_fs_unmount(const void *arg)
             shell_printf("Unmount failed (err %d)\r\n", res);
             break;
     }
+
+    lowpower_sd_spi_down();
 }
 
 /** @brief  Handle the "fs-ls" command
@@ -515,8 +581,13 @@ void handle_wifi_status(const void *arg)
 void handle_wifi_up(const void *arg)
 {
     (void)arg;
+    if (lowpower_profile_peripherals_are_up()) {
+        shell_print("[wifi] WiFi is held down during profile acquisition\r\n");
+        return;
+    }
+
     shell_print("[wifi] Powering up...\r\n");
-    wifi_init(&huart4);
+    lowpower_wifi_start();
     shell_printf("[wifi] Done — state: %s\r\n",
                  wifi_get_state() == WIFI_STATE_STREAMING ? "STREAMING" : "ERROR");
 }
@@ -525,7 +596,7 @@ void handle_wifi_down(const void *arg)
 {
     (void)arg;
     shell_print("[wifi] Powering down...\r\n");
-    wifi_down();
+    lowpower_wifi_stop();
     shell_print("[wifi] Done — state: OFF\r\n");
 }
 

@@ -38,6 +38,14 @@ void lowpower_rtc_spi_up(void);
 
 /* Aggregated low-power flow -------------------------------------------------*/
 void lowpower_init(void);
+void lowpower_idle_peripherals_down(void);
+void lowpower_profile_peripherals_up(void);
+void lowpower_profile_peripherals_down(void);
+bool lowpower_profile_peripherals_are_up(void);
+bool lowpower_rtc_begin(void);
+void lowpower_rtc_end(bool release_spi);
+void lowpower_wifi_start(void);
+void lowpower_wifi_stop(void);
 bool lowpower_request_on(void);
 void lowpower_service(void);
 bool lowpower_is_pending(void);

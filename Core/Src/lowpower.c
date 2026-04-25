@@ -7,6 +7,7 @@
 
 #include "lowpower.h"
 
+#include "config.h"
 #include "ctd.h"
 #include "filesystem.h"
 #include "main.h"
@@ -32,6 +33,8 @@ typedef struct {
     bool filesystem_was_mounted;
     bool sd_power_was_enabled;
     bool wifi_was_enabled;
+    bool profile_peripherals_up;
+    bool profile_peripherals_were_up;
 } lowpower_state_t;
 
 static lowpower_state_t g_lowpower_state;
@@ -69,6 +72,13 @@ static void lowpower_restore_sd_cs_pin(void)
 static void lowpower_restore_rtc_ce_pin(void)
 {
     lowpower_config_output(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_RESET);
+}
+
+static void lowpower_unmount_filesystem(void)
+{
+    if (filesystem_is_mounted()) {
+        (void)filesystem_unmount();
+    }
 }
 
 /* Individual peripheral / pin-group helpers -------------------------------*/
@@ -110,6 +120,7 @@ void lowpower_optode_uart_down(void)
 
     lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin, GPIO_PIN_RESET);
     lowpower_config_analog(GPIOA, GPIO_PIN_2 | GPIO_PIN_3, GPIO_PULLDOWN);
+    g_app.optode_status = PERIPH_OFF;
 }
 
 void lowpower_optode_uart_up(void)
@@ -132,6 +143,7 @@ void lowpower_optode_uart_up(void)
     lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin,
                            GPIO_PIN_SET);
     optode_init(&huart2);
+    g_app.optode_status = PERIPH_READY;
 }
 
 void lowpower_ctd_uart_down(void)
@@ -141,6 +153,7 @@ void lowpower_ctd_uart_down(void)
 
     lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin, GPIO_PIN_RESET);
     lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5, GPIO_PULLDOWN);
+    g_app.ctd_status = PERIPH_OFF;
 }
 
 void lowpower_ctd_uart_up(void)
@@ -162,6 +175,7 @@ void lowpower_ctd_uart_up(void)
 
     lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin, GPIO_PIN_SET);
     ctd_init(&huart3);
+    g_app.ctd_status = PERIPH_READY;
 }
 
 void lowpower_wifi_uart_down(void)
@@ -204,6 +218,7 @@ void lowpower_wetlab_uart_down(void)
     lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin, GPIO_PIN_RESET);
     lowpower_config_analog(GPIOC, GPIO_PIN_12, GPIO_PULLDOWN);
     lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_PULLDOWN);
+    g_app.wetlab_status = PERIPH_OFF;
 }
 
 void lowpower_wetlab_uart_up(void)
@@ -225,6 +240,7 @@ void lowpower_wetlab_uart_up(void)
 
     lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin, GPIO_PIN_RESET);
     wetlab_init(&huart5);
+    g_app.wetlab_status = PERIPH_READY;
 }
 
 void lowpower_sd_spi_down(void)
@@ -234,6 +250,7 @@ void lowpower_sd_spi_down(void)
 
     lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_RESET);
     lowpower_config_analog(GPIOA, SPI1_CS_Pin | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7, GPIO_NOPULL);
+    g_app.sd_status = PERIPH_OFF;
 }
 
 void lowpower_sd_spi_up(void)
@@ -304,6 +321,79 @@ void lowpower_init(void)
     memset(&g_lowpower_state, 0, sizeof(g_lowpower_state));
 }
 
+void lowpower_idle_peripherals_down(void)
+{
+    lowpower_unmount_filesystem();
+    lowpower_sd_spi_down();
+    lowpower_rtc_spi_down();
+    lowpower_wetlab_uart_down();
+    lowpower_optode_uart_down();
+    lowpower_ctd_uart_down();
+    g_lowpower_state.profile_peripherals_up = false;
+}
+
+void lowpower_profile_peripherals_up(void)
+{
+    if (g_lowpower_state.profile_peripherals_up) {
+        return;
+    }
+
+    lowpower_unmount_filesystem();
+    lowpower_sd_spi_down();
+    lowpower_wifi_stop();
+    lowpower_rtc_spi_up();
+    lowpower_ctd_uart_up();
+    lowpower_optode_uart_up();
+    lowpower_wetlab_uart_up();
+
+    g_lowpower_state.profile_peripherals_up = true;
+}
+
+void lowpower_profile_peripherals_down(void)
+{
+    lowpower_unmount_filesystem();
+    lowpower_sd_spi_down();
+    lowpower_wetlab_uart_down();
+    lowpower_optode_uart_down();
+    lowpower_ctd_uart_down();
+    lowpower_rtc_spi_down();
+
+    g_lowpower_state.profile_peripherals_up = false;
+}
+
+bool lowpower_profile_peripherals_are_up(void)
+{
+    return g_lowpower_state.profile_peripherals_up;
+}
+
+bool lowpower_rtc_begin(void)
+{
+    if (g_lowpower_state.profile_peripherals_up) {
+        return false;
+    }
+
+    lowpower_rtc_spi_up();
+    return true;
+}
+
+void lowpower_rtc_end(bool release_spi)
+{
+    if (release_spi) {
+        lowpower_rtc_spi_down();
+    }
+}
+
+void lowpower_wifi_start(void)
+{
+    lowpower_wifi_uart_up();
+    wifi_init(&huart4);
+}
+
+void lowpower_wifi_stop(void)
+{
+    lowpower_wifi_uart_down();
+}
+
 bool lowpower_request_on(void)
 {
     if (g_lowpower_state.pending) {
@@ -328,6 +418,7 @@ void lowpower_prepare_for_sleep(void)
     g_lowpower_state.filesystem_was_mounted = filesystem_is_mounted();
     g_lowpower_state.sd_power_was_enabled = (HAL_GPIO_ReadPin(SD_PWR_GPIO_Port, SD_PWR_Pin) == GPIO_PIN_SET);
     g_lowpower_state.wifi_was_enabled = (wifi_get_state() != WIFI_STATE_OFF);
+    g_lowpower_state.profile_peripherals_were_up = g_lowpower_state.profile_peripherals_up;
 
     if (g_lowpower_state.filesystem_was_mounted) {
         (void)filesystem_unmount();
@@ -343,6 +434,7 @@ void lowpower_prepare_for_sleep(void)
     lowpower_wifi_uart_down();
     lowpower_shell_uart_down();
 
+    g_lowpower_state.profile_peripherals_up = false;
     g_lowpower_state.prepared = true;
 }
 
@@ -353,27 +445,39 @@ void lowpower_restore_from_sleep(void)
     }
 
     lowpower_shell_uart_up();
-    lowpower_wifi_uart_up();
-    lowpower_ctd_uart_up();
-    lowpower_optode_uart_up();
-    lowpower_wetlab_uart_up();
+
+    if (g_lowpower_state.profile_peripherals_were_up) {
+        lowpower_rtc_spi_up();
+        lowpower_ctd_uart_up();
+        lowpower_optode_uart_up();
+        lowpower_wetlab_uart_up();
+        g_lowpower_state.profile_peripherals_up = true;
+    } else {
+        lowpower_rtc_spi_down();
+        lowpower_ctd_uart_down();
+        lowpower_optode_uart_down();
+        lowpower_wetlab_uart_down();
+        g_lowpower_state.profile_peripherals_up = false;
+    }
 
     if (g_lowpower_state.sd_power_was_enabled) {
         lowpower_sd_spi_up();
     }
 
-    lowpower_rtc_spi_up();
     lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
 
     if (g_lowpower_state.filesystem_was_mounted && g_lowpower_state.sd_power_was_enabled) {
         FS_Result_t fs_status = filesystem_mount();
         if (fs_status != FS_OK && fs_status != FS_ALREADY_MOUNTED) {
             shell_printf("[lowpower] SD remount failed (err=%d)\r\n", fs_status);
+            g_app.sd_status = PERIPH_ERROR;
+        } else {
+            g_app.sd_status = PERIPH_READY;
         }
     }
 
     if (g_lowpower_state.wifi_was_enabled) {
-        wifi_init(&huart4);
+        lowpower_wifi_start();
     }
 
     g_lowpower_state.prepared = false;

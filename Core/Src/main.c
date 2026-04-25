@@ -178,8 +178,9 @@ int main(void)
   g_app.wetlab_status = PERIPH_READY;
 
   recorder_init();
-  wifi_init(&huart4);
   lowpower_init();
+  lowpower_idle_peripherals_down();
+  lowpower_wifi_start();
   shell_init();
 
   /* USER CODE END 2 */
