@@ -604,6 +604,16 @@ void handle_wifi_up(const void *arg)
         return;
     }
 
+    wifi_state_t state = wifi_get_state();
+    if (state == WIFI_STATE_STREAMING) {
+        shell_print("[wifi] Already up — state: STREAMING\r\n");
+        return;
+    }
+
+    if (state != WIFI_STATE_OFF) {
+        lowpower_wifi_stop();
+    }
+
     shell_print("[wifi] Powering up...\r\n");
     lowpower_wifi_start();
     shell_printf("[wifi] Done — state: %s\r\n",

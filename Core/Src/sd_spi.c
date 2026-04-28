@@ -434,6 +434,20 @@ DSTATUS USER_SPI_status (
 	return Stat;	/* Return disk status */
 }
 
+/*-----------------------------------------------------------------------*/
+/* Reset cached disk state after SD power is removed                     */
+/*-----------------------------------------------------------------------*/
+
+void USER_SPI_reset (void)
+{
+	Stat = STA_NOINIT;
+	CardType = 0;
+	spi_tx_done = false;
+	spi_rx_done = false;
+	spiTimerTickStart = 0;
+	spiTimerTickDelay = 0;
+}
+
 
 
 /*-----------------------------------------------------------------------*/

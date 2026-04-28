@@ -31,6 +31,7 @@
 
 extern DSTATUS USER_SPI_initialize (BYTE pdrv);
 extern DSTATUS USER_SPI_status (BYTE pdrv);
+extern void USER_SPI_reset (void);
 extern DRESULT USER_SPI_read (BYTE pdrv, BYTE *buff, DWORD sector, UINT count);
 #if _USE_WRITE == 1
   extern DRESULT USER_SPI_write (BYTE pdrv, const BYTE *buff, DWORD sector, UINT count);

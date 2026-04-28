@@ -14,6 +14,7 @@
 #include "main.h"
 #include "optode.h"
 #include "realtime_comm.h"
+#include "sd_spi.h"
 #include "shell.h"
 #include "tasker.h"
 #include "wetlab.h"
@@ -39,7 +40,6 @@ typedef struct {
     bool prepared;
     bool filesystem_was_mounted;
     bool sd_power_was_enabled;
-    bool wifi_was_enabled;
     bool profile_peripherals_up;
     bool profile_peripherals_were_up;
     bool idle_timer_armed;
@@ -412,8 +412,11 @@ void lowpower_wetlab_uart_up(void)
 
 void lowpower_sd_spi_down(void)
 {
+    lowpower_unmount_filesystem();
     HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
+    HAL_SPI_Abort(&hspi1);
     HAL_SPI_DeInit(&hspi1);
+    USER_SPI_reset();
 
     lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_RESET);
     lowpower_config_analog(GPIOA, SPI1_CS_Pin | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7, GPIO_NOPULL);
@@ -422,9 +425,10 @@ void lowpower_sd_spi_down(void)
 
 void lowpower_sd_spi_up(void)
 {
-    lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
-    HAL_Delay(50);
+    USER_SPI_reset();
     lowpower_restore_sd_cs_pin();
+    lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
+    HAL_Delay(100);
 
     hspi1.Instance = SPI1;
     hspi1.Init.Mode = SPI_MODE_MASTER;
@@ -444,6 +448,8 @@ void lowpower_sd_spi_up(void)
     if (HAL_SPI_Init(&hspi1) != HAL_OK) {
         Error_Handler();
     }
+
+    lowpower_restore_sd_cs_pin();
 }
 
 void lowpower_rtc_spi_down(void)
@@ -673,7 +679,6 @@ bool lowpower_prepare_for_sleep(void)
 
     g_lowpower_state.filesystem_was_mounted = filesystem_is_mounted();
     g_lowpower_state.sd_power_was_enabled = (HAL_GPIO_ReadPin(SD_PWR_GPIO_Port, SD_PWR_Pin) == GPIO_PIN_SET);
-    g_lowpower_state.wifi_was_enabled = (wifi_get_state() != WIFI_STATE_OFF);
     g_lowpower_state.profile_peripherals_were_up = g_lowpower_state.profile_peripherals_up;
     g_lowpower_state.idle_timer_armed = false;
     g_lowpower_state.idle_timer_rearm_requested = false;
@@ -734,6 +739,8 @@ void lowpower_restore_from_sleep(void)
 
     lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
 
+    /* WiFi stays down after STOP2 wake. Restart it only from explicit flows
+     * such as recorder completion or the wifi-up command. */
     if (g_lowpower_state.filesystem_was_mounted && g_lowpower_state.sd_power_was_enabled) {
         FS_Result_t fs_status = filesystem_mount();
         if (fs_status != FS_OK && fs_status != FS_ALREADY_MOUNTED) {
@@ -742,10 +749,6 @@ void lowpower_restore_from_sleep(void)
         } else {
             g_app.sd_status = PERIPH_READY;
         }
-    }
-
-    if (g_lowpower_state.wifi_was_enabled) {
-        lowpower_wifi_start();
     }
 
     g_lowpower_state.prepared = false;

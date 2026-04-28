@@ -128,9 +128,19 @@ static uint32_t get_unix_timestamp(void)
 
 static bool sd_mount_for_flush(void)
 {
+    lowpower_sd_spi_down();
+    HAL_Delay(20);
     lowpower_sd_spi_up();
 
     FS_Result_t res = filesystem_mount();
+    if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
+        shell_printf("[recorder] Mount retry after SD restore (err=%d)\r\n", res);
+        lowpower_sd_spi_down();
+        HAL_Delay(20);
+        lowpower_sd_spi_up();
+        res = filesystem_mount();
+    }
+
     if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
         shell_printf("[recorder] Mount failed (err=%d)\r\n", res);
         g_app.sd_status = PERIPH_ERROR;
