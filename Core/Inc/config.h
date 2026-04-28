@@ -61,7 +61,7 @@ typedef enum {
 /* Global application state */
 typedef struct {
     sys_mode_t      mode;
-    volatile bool   start_flag;      /* EXTI PB8 — written from ISR */
+    volatile bool   start_flag;      /* PB8 record trigger request */
     periph_status_t sd_status;
     periph_status_t rtc_status;
     periph_status_t ctd_status;

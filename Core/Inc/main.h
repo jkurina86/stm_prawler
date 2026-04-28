@@ -68,7 +68,6 @@ void SystemClock_Config(void);
 #define SD_PWR_GPIO_Port GPIOB
 #define RTC_INTod_Pin GPIO_PIN_10
 #define RTC_INTod_GPIO_Port GPIOB
-#define RTC_INTod_EXTI_IRQn EXTI15_10_IRQn
 #define SPI2_CS_Pin GPIO_PIN_12
 #define SPI2_CS_GPIO_Port GPIOB
 #define CLK_OE_Pin GPIO_PIN_6
@@ -79,7 +78,6 @@ void SystemClock_Config(void);
 #define PB5_AUX_SEL_A1_GPIO_Port GPIOB
 #define RECORD_TRIGGER_Pin GPIO_PIN_8
 #define RECORD_TRIGGER_GPIO_Port GPIOB
-#define RECORD_TRIGGER_EXTI_IRQn EXTI9_5_IRQn
 #define PB9_TRUCK_INT_OUT_Pin GPIO_PIN_9
 #define PB9_TRUCK_INT_OUT_GPIO_Port GPIOB
 

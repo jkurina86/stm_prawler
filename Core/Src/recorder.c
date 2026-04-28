@@ -59,8 +59,61 @@ static sensor_reading_t reading;
 static uint16_t norm_count;
 static uint32_t debounce_tick;
 static bool     debounce_active;
+static GPIO_PinState pb8_last_state;
+static bool     pb8_state_valid;
 
 /* Private functions ---------------------------------------------------------*/
+
+static GPIO_PinState pb8_read(void)
+{
+    return HAL_GPIO_ReadPin(RECORD_TRIGGER_GPIO_Port, RECORD_TRIGGER_Pin);
+}
+
+static void pb8_sync_state(void)
+{
+    pb8_last_state = pb8_read();
+    pb8_state_valid = true;
+}
+
+static bool pb8_take_start_request(void)
+{
+    bool requested = false;
+    GPIO_PinState current = pb8_read();
+
+    if (g_app.start_flag) {
+        g_app.start_flag = false;
+        requested = true;
+    }
+
+    if (__HAL_GPIO_EXTI_GET_IT(RECORD_TRIGGER_Pin) != RESET) {
+        __HAL_GPIO_EXTI_CLEAR_IT(RECORD_TRIGGER_Pin);
+        requested = true;
+    }
+
+    if (!pb8_state_valid) {
+        pb8_last_state = current;
+        pb8_state_valid = true;
+    } else {
+        if (pb8_last_state == GPIO_PIN_RESET && current == GPIO_PIN_SET) {
+            requested = true;
+        }
+        pb8_last_state = current;
+    }
+
+    if (!requested || current != GPIO_PIN_SET) {
+        return false;
+    }
+
+    lowpower_note_activity();
+    return true;
+}
+
+static void pb8_discard_start_request(void)
+{
+    g_app.start_flag = false;
+    __HAL_GPIO_EXTI_CLEAR_IT(RECORD_TRIGGER_Pin);
+    pb8_sync_state();
+}
 
 static uint32_t get_unix_timestamp(void)
 {
@@ -93,8 +146,9 @@ static bool sd_mount_for_flush(void)
 
 static void return_to_idle(void)
 {
-    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_8);
+    __HAL_GPIO_EXTI_CLEAR_IT(RECORD_TRIGGER_Pin);
     g_app.start_flag = false;
+    pb8_sync_state();
     state = REC_IDLE;
     start_time = 0;
     bringup_tick = 0;
@@ -208,7 +262,7 @@ static void record_sample(uint32_t interval_ms)
  */
 static bool pb8_low_debounced(void)
 {
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) != GPIO_PIN_RESET) {
+    if (pb8_read() != GPIO_PIN_RESET) {
         debounce_active = false;
         return false;
     }
@@ -248,6 +302,7 @@ void recorder_init(void)
     g_profile.count = 0;
     g_profile.sensor_level = SENSOR_CFG_ALL;
     g_profile.start_epoch = 0;
+    pb8_discard_start_request();
 
     /* Seed last filename from SD card if a recording exists */
     if (filesystem_find_latest("_record.csv",
@@ -263,8 +318,7 @@ void recorder_service(void)
     switch (state) {
 
     case REC_IDLE:
-        if (g_app.start_flag) {
-            g_app.start_flag = false;
+        if (!debounce_active && pb8_take_start_request()) {
             debounce_active = true;
             debounce_tick = HAL_GetTick();
             break;
@@ -272,8 +326,9 @@ void recorder_service(void)
 
         /* Wait for PB8 to remain HIGH through debounce period */
         if (debounce_active) {
-            if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8) != GPIO_PIN_SET) {
+            if (pb8_read() != GPIO_PIN_SET) {
                 debounce_active = false;
+                pb8_sync_state();
                 break;
             }
             if ((HAL_GetTick() - debounce_tick) < DEBOUNCE_MS)
@@ -298,8 +353,7 @@ void recorder_service(void)
         break;
 
     case REC_BRINGUP:
-        if (g_app.start_flag)
-            g_app.start_flag = false;
+        pb8_discard_start_request();
 
         if (pb8_low_debounced()) {
             shell_print("[recorder] PB8 LOW during bringup; recording canceled\r\n");
@@ -373,8 +427,7 @@ void recorder_service(void)
 
     case REC_TIMEOUT:
         /* Wait for PB8 to go LOW (debounced) before starting normalization */
-        if (g_app.start_flag)
-            g_app.start_flag = false;
+        pb8_discard_start_request();
 
         if (pb8_low_debounced()) {
             shell_printf("[recorder] PB8 LOW after timeout\r\n");
@@ -384,8 +437,7 @@ void recorder_service(void)
 
     case REC_NORMALIZING:
         /* Ignore PB8 triggers during normalization */
-        if (g_app.start_flag)
-            g_app.start_flag = false;
+        pb8_discard_start_request();
 
         if ((HAL_GetTick() - next_sample_tick) < 0x80000000UL) {
             record_sample(NORM_INTERVAL);
