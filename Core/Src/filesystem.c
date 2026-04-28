@@ -32,12 +32,7 @@ static FS_Result_t convert_fatfs_result(FRESULT result);
 FS_Result_t filesystem_init(void) {
     /* Clear buffers */
     memset(&fs_buffers, 0, sizeof(fs_buffers));
-    
-    /* Initialize path */
-    strcpy(fs_path, "0:");
-    
-    fs_mounted = 0;
-    
+    filesystem_force_reset();
     return FS_OK;
 }
 
@@ -75,6 +70,21 @@ FS_Result_t filesystem_unmount(void) {
     }
     
     return convert_fatfs_result(fs_result);
+}
+
+/**
+  * @brief Force FatFS and wrapper state back to unmounted.
+  * @note  This is for SD power-cycle boundaries. It intentionally unregisters
+  *        the FatFS work area even if the wrapper never marked mount success.
+  */
+void filesystem_force_reset(void) {
+    (void)f_mount(NULL, "0:", 0);
+    memset(&fs, 0, sizeof(fs));
+    memset(&fil, 0, sizeof(fil));
+    memset(&log_fil, 0, sizeof(log_fil));
+    strcpy(fs_path, "0:");
+    fs_result = FR_OK;
+    fs_mounted = 0;
 }
 
 /**

@@ -413,7 +413,7 @@ void lowpower_sd_spi_down(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    lowpower_unmount_filesystem();
+    filesystem_force_reset();
     HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
     HAL_SPI_Abort(&hspi1);
     HAL_SPI_DeInit(&hspi1);

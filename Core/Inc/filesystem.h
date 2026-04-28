@@ -42,6 +42,7 @@ typedef struct {
 FS_Result_t filesystem_init(void);
 FS_Result_t filesystem_mount(void);
 FS_Result_t filesystem_unmount(void);
+void filesystem_force_reset(void);
 bool filesystem_is_mounted(void);
 int filesystem_last_fatfs_result(void);
 
