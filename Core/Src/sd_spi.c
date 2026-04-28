@@ -28,7 +28,6 @@
 #include "sd_spi.h"
 #include "stm32l4xx_hal.h" /* Provide the low-level HAL functions */
 #include "main.h" /* Include the main header for GPIO and other configurations */
-#include <stdbool.h>
 
 extern SPI_HandleTypeDef SD_SPI_HANDLE;
 
@@ -86,39 +85,6 @@ BYTE CardType;			/* Card type flags */
 uint32_t spiTimerTickStart;
 uint32_t spiTimerTickDelay;
 
-/* BEGIN SPI DMA CODE */
-
-/* ---- SPI DMA completion flags ---- */
-static volatile bool spi_tx_done = false;
-static volatile bool spi_rx_done = false;
-
-/* HAL DMA completion callback for TX */
-void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
-    if (hspi == &SD_SPI_HANDLE) {
-		spi_tx_done = true;
-	}
-}
-
-/* HAL DMA completion callback for RX */
-void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
-    if (hspi == &SD_SPI_HANDLE) {
-		spi_rx_done = true;
-	}
-}
-
-/* Spin-wait helper with timeout */
-static bool wait_flag(volatile bool *flag, uint32_t timeout_ms){
-    uint32_t t0 = HAL_GetTick();
-    while (!*flag) {
-        HAL_Delay(1);
-        if ((HAL_GetTick() - t0) > timeout_ms) return false;
-    }
-    *flag = false;   // consume flag
-    return true;
-}
-
-/* END SPI DMA CODE */
-
 void SPI_Timer_On(uint32_t waitTicks) {
     spiTimerTickStart = HAL_GetTick();
     spiTimerTickDelay = waitTicks;
@@ -151,14 +117,7 @@ void rcvr_spi_multi (
 	UINT btr		/* Number of bytes to receive (even number) */
 )
 {
-	spi_rx_done = false;
-	if (HAL_SPI_Receive_DMA(&SD_SPI_HANDLE, buff, btr) != HAL_OK) {
-		return;
-	}
-	/* Wait up to 1 second - extreme case for a very slow SD card */
-	if (!wait_flag(&spi_rx_done, 1000)) {
-		/* Handle error */
-	}
+	HAL_SPI_Receive(&SD_SPI_HANDLE, buff, btr, 1000);
 }
 
 
@@ -170,22 +129,7 @@ void xmit_spi_multi (
 	UINT btx			/* Number of bytes to send (even number) */
 )
 {
-	/* OLD DRIVER CODE - BLOCKING HAL TRANSFER */
-	/*
-	HAL_SPI_Transmit(&SD_SPI_HANDLE, buff, btx, HAL_MAX_DELAY);
-	*/
-
-	/* BEGIN SPI DMA CODE */
-	spi_tx_done = false;
-    if (HAL_SPI_Transmit_DMA(&SD_SPI_HANDLE, (uint8_t*)buff, btx) != HAL_OK) {
-        //HAL_SPI_Transmit(&SD_SPI_HANDLE, (uint8_t*)buff, btx, HAL_MAX_DELAY);
-        return;
-    }
-	/* Wait up to 1 second - extreme case for a very slow SD card */
-    if (!wait_flag(&spi_tx_done, 1000)) {
-        /* Handle error */
-    }
-	/* END SPI DMA CODE */
+	HAL_SPI_Transmit(&SD_SPI_HANDLE, (uint8_t*)buff, btx, 1000);
 }
 #endif
 
@@ -442,8 +386,6 @@ void USER_SPI_reset (void)
 {
 	Stat = STA_NOINIT;
 	CardType = 0;
-	spi_tx_done = false;
-	spi_rx_done = false;
 	spiTimerTickStart = 0;
 	spiTimerTickDelay = 0;
 }

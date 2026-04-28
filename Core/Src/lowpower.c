@@ -77,6 +77,7 @@ static void lowpower_config_analog(GPIO_TypeDef *port, uint16_t pins, uint32_t p
 
 static void lowpower_restore_sd_cs_pin(void)
 {
+    __HAL_RCC_GPIOA_CLK_ENABLE();
     lowpower_config_output(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
 }
 
@@ -163,8 +164,6 @@ static void lowpower_clear_stop2_pending_irqs(void)
     HAL_NVIC_ClearPendingIRQ(DMA1_Channel6_IRQn);
     HAL_NVIC_ClearPendingIRQ(DMA1_Channel7_IRQn);
     HAL_NVIC_ClearPendingIRQ(DMA2_Channel2_IRQn);
-    HAL_NVIC_ClearPendingIRQ(DMA2_Channel3_IRQn);
-    HAL_NVIC_ClearPendingIRQ(DMA2_Channel4_IRQn);
     SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk;
 }
 
@@ -412,6 +411,8 @@ void lowpower_wetlab_uart_up(void)
 
 void lowpower_sd_spi_down(void)
 {
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
     lowpower_unmount_filesystem();
     HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
     HAL_SPI_Abort(&hspi1);
@@ -425,10 +426,15 @@ void lowpower_sd_spi_down(void)
 
 void lowpower_sd_spi_up(void)
 {
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
     USER_SPI_reset();
     lowpower_restore_sd_cs_pin();
     lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
     HAL_Delay(100);
+
+    __HAL_RCC_SPI1_FORCE_RESET();
+    __HAL_RCC_SPI1_RELEASE_RESET();
 
     hspi1.Instance = SPI1;
     hspi1.Init.Mode = SPI_MODE_MASTER;

@@ -134,7 +134,8 @@ static bool sd_mount_for_flush(void)
 
     FS_Result_t res = filesystem_mount();
     if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
-        shell_printf("[recorder] Mount retry after SD restore (err=%d)\r\n", res);
+        shell_printf("[recorder] Mount retry after SD restore (err=%d fatfs=%d)\r\n",
+                     res, filesystem_last_fatfs_result());
         lowpower_sd_spi_down();
         HAL_Delay(20);
         lowpower_sd_spi_up();
@@ -142,7 +143,8 @@ static bool sd_mount_for_flush(void)
     }
 
     if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
-        shell_printf("[recorder] Mount failed (err=%d)\r\n", res);
+        shell_printf("[recorder] Mount failed (err=%d fatfs=%d)\r\n",
+                     res, filesystem_last_fatfs_result());
         g_app.sd_status = PERIPH_ERROR;
         lowpower_sd_spi_down();
         return false;

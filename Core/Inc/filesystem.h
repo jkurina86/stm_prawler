@@ -43,6 +43,7 @@ FS_Result_t filesystem_init(void);
 FS_Result_t filesystem_mount(void);
 FS_Result_t filesystem_unmount(void);
 bool filesystem_is_mounted(void);
+int filesystem_last_fatfs_result(void);
 
 /* Directory operations */
 FS_Result_t filesystem_ls(void (*print_callback)(const char *));

@@ -85,6 +85,10 @@ bool filesystem_is_mounted(void) {
     return fs_mounted != 0;
 }
 
+int filesystem_last_fatfs_result(void) {
+    return (int)fs_result;
+}
+
 /**
   * @brief List directory contents
   * @param print_callback: Function to call for each directory entry

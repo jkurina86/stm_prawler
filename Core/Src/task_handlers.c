@@ -523,7 +523,8 @@ void handle_fs_mount(const void *arg)
             break;
         default:
             g_app.sd_status = PERIPH_ERROR;
-            shell_printf("Mount failed (err %d)\r\n", res);
+            shell_printf("Mount failed (err %d fatfs %d)\r\n",
+                         res, filesystem_last_fatfs_result());
             lowpower_sd_spi_down();
             break;
     }
@@ -568,7 +569,8 @@ void handle_fs_ls(const void *arg)
     FS_Result_t res = filesystem_mount();
     if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
         g_app.sd_status = PERIPH_ERROR;
-        shell_printf("Mount failed (err %d)\r\n", res);
+        shell_printf("Mount failed (err %d fatfs %d)\r\n",
+                     res, filesystem_last_fatfs_result());
         lowpower_sd_spi_down();
         return;
     }
