@@ -146,23 +146,22 @@ int main(void)
 
   shell_printf("System Initialization...\r\n");
 
-  /* Turn on SD card power */
-  HAL_GPIO_WritePin(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
-  HAL_Delay(50);
-
-
-
   config_init();
   transceiver_init();
   tasker_init();
 
   filesystem_init();
-  if (filesystem_mount() == FS_OK) {
+  lowpower_sd_spi_up();
+  FS_Result_t fs_status = filesystem_mount();
+  if (fs_status == FS_OK || fs_status == FS_ALREADY_MOUNTED) {
       g_app.sd_status = PERIPH_READY;
+      shell_print("SD CARD: OK\r\n");
+      (void)filesystem_unmount();
   } else {
       g_app.sd_status = PERIPH_ERROR;
       shell_printf("SD card mount failed\r\n");
   }
+  lowpower_sd_spi_down();
 
   RTC_Status_t rtc_init_status = RTC_Init();
   if (rtc_init_status == RTC_OK) {

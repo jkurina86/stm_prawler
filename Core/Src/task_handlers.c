@@ -511,11 +511,15 @@ void handle_fs_mount(const void *arg)
     switch (res) {
         case FS_OK:
             g_app.sd_status = PERIPH_READY;
-            shell_print("File system mounted\r\n");
+            shell_print("File system mount OK\r\n");
+            (void)filesystem_unmount();
+            lowpower_sd_spi_down();
             break;
         case FS_ALREADY_MOUNTED:
             g_app.sd_status = PERIPH_READY;
             shell_print("File system already mounted\r\n");
+            (void)filesystem_unmount();
+            lowpower_sd_spi_down();
             break;
         default:
             g_app.sd_status = PERIPH_ERROR;
@@ -555,12 +559,28 @@ void handle_fs_unmount(const void *arg)
 void handle_fs_ls(const void *arg)
 {
     (void)arg;
-    FS_Result_t res = filesystem_ls(shell_print);
-    if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res != FS_OK) {
+    if (lowpower_profile_peripherals_are_up()) {
+        shell_print("[fs] SD access is unavailable during a profile\r\n");
+        return;
+    }
+
+    lowpower_sd_spi_up();
+    FS_Result_t res = filesystem_mount();
+    if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
+        g_app.sd_status = PERIPH_ERROR;
+        shell_printf("Mount failed (err %d)\r\n", res);
+        lowpower_sd_spi_down();
+        return;
+    }
+
+    g_app.sd_status = PERIPH_READY;
+    res = filesystem_ls(shell_print);
+    if (res != FS_OK) {
         shell_printf("ls failed (err %d)\r\n", res);
     }
+
+    (void)filesystem_unmount();
+    lowpower_sd_spi_down();
 }
 
 /* WiFi Handlers ----------------------------------------------------------*/

@@ -21,7 +21,6 @@
 #include "stm32l4xx_hal.h"
 #include "config.h"
 
-#include <string.h>
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
@@ -53,7 +52,6 @@ static uint16_t sample_count;
 static uint32_t next_sample_tick;
 static uint32_t bringup_tick;
 static char rec_filename[32];
-static char last_successful_filename[32];
 
 static sensor_reading_t reading;
 static uint16_t norm_count;
@@ -303,14 +301,6 @@ void recorder_init(void)
     g_profile.sensor_level = SENSOR_CFG_ALL;
     g_profile.start_epoch = 0;
     pb8_discard_start_request();
-
-    /* Seed last filename from SD card if a recording exists */
-    if (filesystem_find_latest("_record.csv",
-            last_successful_filename,
-            sizeof(last_successful_filename)) == FS_OK) {
-        shell_printf("[recorder] Found previous recording: %s\r\n",
-                     last_successful_filename);
-    }
 }
 
 void recorder_service(void)
@@ -457,9 +447,6 @@ void recorder_service(void)
                 }
 
                 if (flush_profile_to_sd()) {
-                    strncpy(last_successful_filename, rec_filename,
-                            sizeof(last_successful_filename) - 1);
-                    last_successful_filename[sizeof(last_successful_filename) - 1] = '\0';
                     shell_printf("[recorder] Complete. %u records in %s\r\n",
                                  g_profile.count, rec_filename);
                 } else {
