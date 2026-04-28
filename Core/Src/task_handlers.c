@@ -18,6 +18,7 @@
 #include "wifi.h"
 #include "realtime_comm.h"
 #include "lowpower.h"
+#include "sd_spi.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -58,6 +59,25 @@ static bool sensor_shell_peripherals_available(void)
 
     shell_print("[power] Sensor peripherals are off in idle; PB8 profile start owns sensor power\r\n");
     return false;
+}
+
+static void print_sd_diag(void)
+{
+    const SD_SPI_Diag_t *diag = USER_SPI_diag();
+
+    shell_printf("[sd] stage=%s stat=0x%02x type=0x%02x cmd=%u resp=0x%02x "
+                 "token=0x%02x sector=%lu count=%u hal=%u spierr=0x%08lx dres=%d\r\n",
+                 USER_SPI_diag_stage_name(diag->stage),
+                 diag->stat,
+                 diag->card_type,
+                 diag->last_cmd,
+                 diag->last_resp,
+                 diag->last_token,
+                 (unsigned long)diag->last_sector,
+                 diag->last_count,
+                 diag->last_hal_status,
+                 (unsigned long)diag->spi_error,
+                 diag->last_result);
 }
 
 /** @brief  Handle the "help" command
@@ -525,6 +545,7 @@ void handle_fs_mount(const void *arg)
             g_app.sd_status = PERIPH_ERROR;
             shell_printf("Mount failed (err %d fatfs %d)\r\n",
                          res, filesystem_last_fatfs_result());
+            print_sd_diag();
             lowpower_sd_spi_down();
             break;
     }
@@ -571,6 +592,7 @@ void handle_fs_ls(const void *arg)
         g_app.sd_status = PERIPH_ERROR;
         shell_printf("Mount failed (err %d fatfs %d)\r\n",
                      res, filesystem_last_fatfs_result());
+        print_sd_diag();
         lowpower_sd_spi_down();
         return;
     }

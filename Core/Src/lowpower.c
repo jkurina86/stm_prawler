@@ -14,9 +14,9 @@
 #include "main.h"
 #include "optode.h"
 #include "realtime_comm.h"
-#include "sd_spi.h"
 #include "shell.h"
 #include "tasker.h"
+#include "user_diskio.h"
 #include "wetlab.h"
 #include "wifi.h"
 
@@ -417,7 +417,7 @@ void lowpower_sd_spi_down(void)
     HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
     HAL_SPI_Abort(&hspi1);
     HAL_SPI_DeInit(&hspi1);
-    USER_SPI_reset();
+    USER_diskio_reset();
 
     lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_RESET);
     lowpower_config_analog(GPIOA, SPI1_CS_Pin | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7, GPIO_NOPULL);
@@ -428,10 +428,8 @@ void lowpower_sd_spi_up(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    USER_SPI_reset();
+    USER_diskio_reset();
     lowpower_restore_sd_cs_pin();
-    lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
-    HAL_Delay(100);
 
     __HAL_RCC_SPI1_FORCE_RESET();
     __HAL_RCC_SPI1_RELEASE_RESET();
@@ -456,6 +454,8 @@ void lowpower_sd_spi_up(void)
     }
 
     lowpower_restore_sd_cs_pin();
+    lowpower_config_output(SD_PWR_GPIO_Port, SD_PWR_Pin, GPIO_PIN_SET);
+    HAL_Delay(100);
 }
 
 void lowpower_rtc_spi_down(void)

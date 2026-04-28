@@ -28,6 +28,7 @@
 #include "sd_spi.h"
 #include "stm32l4xx_hal.h" /* Provide the low-level HAL functions */
 #include "main.h" /* Include the main header for GPIO and other configurations */
+#include <string.h>
 
 extern SPI_HandleTypeDef SD_SPI_HANDLE;
 
@@ -82,8 +83,81 @@ DSTATUS Stat = STA_NOINIT;	/* Physical drive status */
 static
 BYTE CardType;			/* Card type flags */
 
+enum {
+	SD_DIAG_IDLE = 0,
+	SD_DIAG_INIT_BEGIN,
+	SD_DIAG_INIT_CMD0_FAIL,
+	SD_DIAG_INIT_CMD8_OCR_FAIL,
+	SD_DIAG_INIT_ACMD41_TIMEOUT,
+	SD_DIAG_INIT_CMD58_FAIL,
+	SD_DIAG_INIT_CMD16_FAIL,
+	SD_DIAG_INIT_OK,
+	SD_DIAG_SELECT_TIMEOUT,
+	SD_DIAG_XCHG_HAL_FAIL,
+	SD_DIAG_READ_BEGIN,
+	SD_DIAG_READ_NOT_READY,
+	SD_DIAG_READ_CMD_FAIL,
+	SD_DIAG_READ_TOKEN_FAIL,
+	SD_DIAG_READ_HAL_FAIL,
+	SD_DIAG_READ_OK,
+	SD_DIAG_IOCTL_BEGIN,
+	SD_DIAG_IOCTL_FAIL,
+	SD_DIAG_IOCTL_OK
+};
+
+static SD_SPI_Diag_t sd_diag;
+
 uint32_t spiTimerTickStart;
 uint32_t spiTimerTickDelay;
+
+static void sd_diag_set_stage(uint8_t stage)
+{
+	sd_diag.stage = stage;
+	sd_diag.stat = Stat;
+	sd_diag.card_type = CardType;
+}
+
+static void sd_diag_record_hal(HAL_StatusTypeDef status)
+{
+	sd_diag.last_hal_status = (uint8_t)status;
+	sd_diag.spi_error = HAL_SPI_GetError(&SD_SPI_HANDLE);
+	if (status != HAL_OK) {
+		sd_diag_set_stage(SD_DIAG_XCHG_HAL_FAIL);
+	}
+}
+
+const SD_SPI_Diag_t *USER_SPI_diag(void)
+{
+	sd_diag.stat = Stat;
+	sd_diag.card_type = CardType;
+	return &sd_diag;
+}
+
+const char *USER_SPI_diag_stage_name(uint8_t stage)
+{
+	switch (stage) {
+	case SD_DIAG_IDLE: return "idle";
+	case SD_DIAG_INIT_BEGIN: return "init-begin";
+	case SD_DIAG_INIT_CMD0_FAIL: return "init-cmd0-fail";
+	case SD_DIAG_INIT_CMD8_OCR_FAIL: return "init-cmd8-ocr-fail";
+	case SD_DIAG_INIT_ACMD41_TIMEOUT: return "init-acmd41-timeout";
+	case SD_DIAG_INIT_CMD58_FAIL: return "init-cmd58-fail";
+	case SD_DIAG_INIT_CMD16_FAIL: return "init-cmd16-fail";
+	case SD_DIAG_INIT_OK: return "init-ok";
+	case SD_DIAG_SELECT_TIMEOUT: return "select-timeout";
+	case SD_DIAG_XCHG_HAL_FAIL: return "xchg-hal-fail";
+	case SD_DIAG_READ_BEGIN: return "read-begin";
+	case SD_DIAG_READ_NOT_READY: return "read-not-ready";
+	case SD_DIAG_READ_CMD_FAIL: return "read-cmd-fail";
+	case SD_DIAG_READ_TOKEN_FAIL: return "read-token-fail";
+	case SD_DIAG_READ_HAL_FAIL: return "read-hal-fail";
+	case SD_DIAG_READ_OK: return "read-ok";
+	case SD_DIAG_IOCTL_BEGIN: return "ioctl-begin";
+	case SD_DIAG_IOCTL_FAIL: return "ioctl-fail";
+	case SD_DIAG_IOCTL_OK: return "ioctl-ok";
+	default: return "unknown";
+	}
+}
 
 void SPI_Timer_On(uint32_t waitTicks) {
     spiTimerTickStart = HAL_GetTick();
@@ -105,19 +179,42 @@ BYTE xchg_spi (
 )
 {
 	BYTE rxDat;
-    HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1, 50);
+    HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, &dat, &rxDat, 1, 50);
+    sd_diag_record_hal(status);
+    if (status != HAL_OK) {
+        return 0xFF;
+    }
     return rxDat;
 }
 
 
-/* Receive multiple byte via DMA */
+/* Receive multiple bytes while clocking 0xFF on MOSI. */
 static
-void rcvr_spi_multi (
+int rcvr_spi_multi (
 	BYTE *buff,		/* Pointer to data buffer */
 	UINT btr		/* Number of bytes to receive (even number) */
 )
 {
-	HAL_SPI_Receive(&SD_SPI_HANDLE, buff, btr, 1000);
+	static const BYTE dummy_tx[32] = {
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+	};
+
+	while (btr) {
+		UINT chunk = (btr > sizeof(dummy_tx)) ? sizeof(dummy_tx) : btr;
+		HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(&SD_SPI_HANDLE, dummy_tx, buff, chunk, 1000);
+		sd_diag_record_hal(status);
+		if (status != HAL_OK) {
+			sd_diag_set_stage(SD_DIAG_READ_HAL_FAIL);
+			return 0;
+		}
+		buff += chunk;
+		btr -= chunk;
+	}
+
+	return 1;
 }
 
 
@@ -186,6 +283,7 @@ int spiselect (void)	/* 1:OK, 0:Timeout */
 	xchg_spi(0xFF);	/* Dummy clock (force DO enabled) */
 	if (wait_ready(500)) return 1;	/* Wait for card ready */
 
+	sd_diag_set_stage(SD_DIAG_SELECT_TIMEOUT);
 	despiselect();
 	return 0;	/* Timeout */
 }
@@ -208,11 +306,15 @@ int rcvr_datablock (	/* 1:OK, 0:Error */
 	SPI_Timer_On(200);
 	do {							/* Wait for DataStart token in timeout of 200ms */
 		token = xchg_spi(0xFF);
+		sd_diag.last_token = token;
 		/* This loop will take a time. Insert rot_rdq() here for multitask envilonment. */
 	} while ((token == 0xFF) && SPI_Timer_Status());
-	if(token != 0xFE) return 0;		/* Function fails if invalid DataStart token or timeout */
+	if(token != 0xFE) {
+		sd_diag_set_stage(SD_DIAG_READ_TOKEN_FAIL);
+		return 0;		/* Function fails if invalid DataStart token or timeout */
+	}
 
-	rcvr_spi_multi(buff, btr);		/* Store trailing data to the buffer */
+	if (!rcvr_spi_multi(buff, btr)) return 0;	/* Store trailing data to the buffer */
 	xchg_spi(0xFF); xchg_spi(0xFF);			/* Discard CRC */
 
 	return 1;						/* Function succeeded */
@@ -268,6 +370,9 @@ BYTE send_cmd (		/* Return value: R1 resp (bit7==1:Failed to send) */
 		if (res > 1) return res;
 	}
 
+	sd_diag.last_cmd = cmd;
+	sd_diag.last_arg = arg;
+
 	/* Select the card and wait for ready except to stop multiple block read */
 	if (cmd != CMD12) {
 		despiselect();
@@ -292,6 +397,7 @@ BYTE send_cmd (		/* Return value: R1 resp (bit7==1:Failed to send) */
 		res = xchg_spi(0xFF);
 	} while ((res & 0x80) && --n);
 
+	sd_diag.last_resp = res;
 	return res;							/* Return received response */
 }
 
@@ -318,26 +424,35 @@ DSTATUS USER_SPI_initialize (
 )
 {
 	BYTE n, cmd, ty, ocr[4];
+	BYTE resp;
 
 	if (drv != 0) return STA_NOINIT;		/* Supports only drive 0 */
 	//assume SPI already init init_spi();	/* Initialize SPI */
 
 	if (Stat & STA_NODISK) return Stat;	/* Is card existing in the socket? */
 
+	memset(&sd_diag, 0, sizeof(sd_diag));
+	sd_diag_set_stage(SD_DIAG_INIT_BEGIN);
 	FCLK_SLOW();
 	for (n = 10; n; n--) xchg_spi(0xFF);	/* Send 80 dummy clocks */
 
 	ty = 0;
-	if (send_cmd(CMD0, 0) == 1) {			/* Put the card SPI/Idle state */
+	resp = send_cmd(CMD0, 0);
+	if (resp == 1) {			/* Put the card SPI/Idle state */
 		SPI_Timer_On(1000);					/* Initialization timeout = 1 sec */
-		if (send_cmd(CMD8, 0x1AA) == 1) {	/* SDv2? */
+		resp = send_cmd(CMD8, 0x1AA);
+		if (resp == 1) {	/* SDv2? */
 			for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);	/* Get 32 bit return value of R7 resp */
 			if (ocr[2] == 0x01 && ocr[3] == 0xAA) {				/* Is the card supports vcc of 2.7-3.6V? */
 				while (SPI_Timer_Status() && send_cmd(ACMD41, 1UL << 30)) ;	/* Wait for end of initialization with ACMD41(HCS) */
 				if (SPI_Timer_Status() && send_cmd(CMD58, 0) == 0) {		/* Check CCS bit in the OCR */
 					for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);
 					ty = (ocr[0] & 0x40) ? CT_SD2 | CT_BLOCK : CT_SD2;	/* Card id SDv2 */
+				} else {
+					sd_diag_set_stage(SD_DIAG_INIT_CMD58_FAIL);
 				}
+			} else {
+				sd_diag_set_stage(SD_DIAG_INIT_CMD8_OCR_FAIL);
 			}
 		} else {	/* Not SDv2 card */
 			if (send_cmd(ACMD41, 0) <= 1) 	{	/* SDv1 or MMC? */
@@ -347,8 +462,13 @@ DSTATUS USER_SPI_initialize (
 			}
 			while (SPI_Timer_Status() && send_cmd(cmd, 0)) ;		/* Wait for end of initialization */
 			if (!SPI_Timer_Status() || send_cmd(CMD16, 512) != 0)	/* Set block length: 512 */
+			{
+				sd_diag_set_stage(SD_DIAG_INIT_CMD16_FAIL);
 				ty = 0;
+			}
 		}
+	} else {
+		sd_diag_set_stage(SD_DIAG_INIT_CMD0_FAIL);
 	}
 	CardType = ty;	/* Card type */
 	despiselect();
@@ -356,8 +476,12 @@ DSTATUS USER_SPI_initialize (
 	if (ty) {			/* OK */
 		FCLK_FAST();			/* Set fast clock */
 		Stat &= ~STA_NOINIT;	/* Clear STA_NOINIT flag */
+		sd_diag_set_stage(SD_DIAG_INIT_OK);
 	} else {			/* Failed */
 		Stat = STA_NOINIT;
+		if (sd_diag.stage == SD_DIAG_INIT_BEGIN) {
+			sd_diag_set_stage(SD_DIAG_INIT_ACMD41_TIMEOUT);
+		}
 	}
 
 	return Stat;
@@ -388,6 +512,8 @@ void USER_SPI_reset (void)
 	CardType = 0;
 	spiTimerTickStart = 0;
 	spiTimerTickDelay = 0;
+	memset(&sd_diag, 0, sizeof(sd_diag));
+	sd_diag_set_stage(SD_DIAG_IDLE);
 }
 
 
@@ -404,27 +530,45 @@ DRESULT USER_SPI_read (
 )
 {
 	if (drv || !count) return RES_PARERR;		/* Check parameter */
-	if (Stat & STA_NOINIT) return RES_NOTRDY;	/* Check if drive is ready */
+	sd_diag_set_stage(SD_DIAG_READ_BEGIN);
+	sd_diag.last_sector = sector;
+	sd_diag.last_count = count;
+	sd_diag.last_result = RES_ERROR;
+	if (Stat & STA_NOINIT) {
+		sd_diag.last_result = RES_NOTRDY;
+		sd_diag_set_stage(SD_DIAG_READ_NOT_READY);
+		return RES_NOTRDY;	/* Check if drive is ready */
+	}
 
 	if (!(CardType & CT_BLOCK)) sector *= 512;	/* LBA ot BA conversion (byte addressing cards) */
 
 	if (count == 1) {	/* Single sector read */
-		if ((send_cmd(CMD17, sector) == 0)	/* READ_SINGLE_BLOCK */
+		BYTE resp = send_cmd(CMD17, sector);
+		if ((resp == 0)	/* READ_SINGLE_BLOCK */
 			&& rcvr_datablock(buff, 512)) {
 			count = 0;
+		} else if (resp != 0) {
+			sd_diag_set_stage(SD_DIAG_READ_CMD_FAIL);
 		}
 	}
 	else {				/* Multiple sector read */
-		if (send_cmd(CMD18, sector) == 0) {	/* READ_MULTIPLE_BLOCK */
+		BYTE resp = send_cmd(CMD18, sector);
+		if (resp == 0) {	/* READ_MULTIPLE_BLOCK */
 			do {
 				if (!rcvr_datablock(buff, 512)) break;
 				buff += 512;
 			} while (--count);
 			send_cmd(CMD12, 0);				/* STOP_TRANSMISSION */
+		} else {
+			sd_diag_set_stage(SD_DIAG_READ_CMD_FAIL);
 		}
 	}
 	despiselect();
 
+	sd_diag.last_result = count ? RES_ERROR : RES_OK;
+	if (!count) {
+		sd_diag_set_stage(SD_DIAG_READ_OK);
+	}
 	return count ? RES_ERROR : RES_OK;	/* Return result */
 }
 
@@ -491,6 +635,7 @@ DRESULT USER_SPI_ioctl (
 	if (Stat & STA_NOINIT) return RES_NOTRDY;	/* Check if drive is ready */
 
 	res = RES_ERROR;
+	sd_diag_set_stage(SD_DIAG_IOCTL_BEGIN);
 
 	switch (cmd) {
 	case CTRL_SYNC :		/* Wait for end of internal write process of the drive */
@@ -513,7 +658,7 @@ DRESULT USER_SPI_ioctl (
 
 	/* BROKEN DRIVER FIX: The original left this out leading to FatFS failing to mount */
 	case GET_SECTOR_SIZE :	/* Get sector size (for multiple sector size (_MAX_SS >= 1024)) */
-		*(DWORD*)buff = 512;	/* Returns the sector size of 512 in unit of BYTE */
+		*(WORD*)buff = 512;	/* Returns the sector size of 512 in unit of BYTE */
 		res = RES_OK;
 		break;
 
@@ -558,6 +703,8 @@ DRESULT USER_SPI_ioctl (
 
 	despiselect();
 
+	sd_diag.last_result = res;
+	sd_diag_set_stage(res == RES_OK ? SD_DIAG_IOCTL_OK : SD_DIAG_IOCTL_FAIL);
 	return res;
 }
 #endif
