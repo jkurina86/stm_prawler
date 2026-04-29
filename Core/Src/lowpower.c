@@ -23,7 +23,9 @@
 #include <string.h>
 
 #define LOWPOWER_IDLE_TIMEOUT_SECONDS 60UL
-#define LOWPOWER_RTC_WAKE_SECONDS 15UL
+#define LOWPOWER_IDLE_TIMEOUT_MS (LOWPOWER_IDLE_TIMEOUT_SECONDS * 1000UL)
+#define LOWPOWER_RTC_RETURN_TIMEOUT_MS 2000UL
+#define LOWPOWER_RTC_WAKE_SECONDS 28UL
 
 /* External peripheral handles declared in main.c ---------------------------*/
 extern SPI_HandleTypeDef hspi1;
@@ -42,10 +44,10 @@ typedef struct {
     bool sd_power_was_enabled;
     bool profile_peripherals_up;
     bool profile_peripherals_were_up;
-    bool idle_timer_armed;
-    volatile bool idle_timer_rearm_requested;
+    bool quiet_sleep_entry;
     volatile bool idle_timer_active;
     volatile uint32_t idle_started_tick;
+    volatile uint32_t idle_timeout_ms;
 } lowpower_state_t;
 
 static lowpower_state_t g_lowpower_state;
@@ -184,7 +186,7 @@ static void lowpower_enter_stop2_wfe(void)
 
 static bool lowpower_record_trigger_asserted(void)
 {
-    if (HAL_GPIO_ReadPin(RECORD_TRIGGER_GPIO_Port, RECORD_TRIGGER_Pin) != GPIO_PIN_SET) {
+    if (HAL_GPIO_ReadPin(RECORD_TRIGGER_GPIO_Port, RECORD_TRIGGER_Pin) != GPIO_PIN_RESET) {
         return false;
     }
 
@@ -237,14 +239,16 @@ static bool lowpower_prepare_stop2_entry(bool *rtc_wake)
     return true;
 }
 
-static RTC_Status_t lowpower_program_rtc_idle_timer(void)
-{
-    return lowpower_program_rtc_countdown((uint16_t)LOWPOWER_IDLE_TIMEOUT_SECONDS);
-}
-
 static RTC_Status_t lowpower_program_rtc_wake_timer(void)
 {
     return lowpower_program_rtc_countdown((uint16_t)LOWPOWER_RTC_WAKE_SECONDS);
+}
+
+static void lowpower_start_idle_timer(uint32_t timeout_ms)
+{
+    g_lowpower_state.idle_started_tick = HAL_GetTick();
+    g_lowpower_state.idle_timeout_ms = timeout_ms;
+    g_lowpower_state.idle_timer_active = true;
 }
 
 /* Individual peripheral / pin-group helpers -------------------------------*/
@@ -508,9 +512,7 @@ void lowpower_enter_idle(void)
 
 void lowpower_note_activity(void)
 {
-    g_lowpower_state.idle_started_tick = HAL_GetTick();
-    g_lowpower_state.idle_timer_active = true;
-    g_lowpower_state.idle_timer_rearm_requested = true;
+    lowpower_start_idle_timer(LOWPOWER_IDLE_TIMEOUT_MS);
 }
 
 uint32_t lowpower_idle_elapsed_ms(void)
@@ -602,6 +604,7 @@ bool lowpower_request_on(void)
     }
 
     g_lowpower_state.pending = true;
+    g_lowpower_state.quiet_sleep_entry = false;
     return true;
 }
 
@@ -629,50 +632,27 @@ static bool lowpower_idle_timer_allowed(void)
     return true;
 }
 
-static void lowpower_disarm_idle_timer(void)
-{
-    if (g_lowpower_state.idle_timer_armed) {
-        (void)lowpower_stop_rtc_countdown();
-        g_lowpower_state.idle_timer_armed = false;
-    }
-}
-
 static void lowpower_service_idle_timer(void)
 {
-    bool rtc_timer_event = RTC_IsInterruptPending() || RTC_IsInterruptAsserted();
-
     if (g_lowpower_state.prepared) {
         return;
     }
 
-    if (rtc_timer_event && g_lowpower_state.idle_timer_armed) {
-        lowpower_disarm_idle_timer();
-        g_lowpower_state.idle_timer_rearm_requested = false;
-
-        if (lowpower_idle_timer_allowed()) {
-            g_lowpower_state.pending = true;
-            shell_print("[lowpower] Idle RTC timer expired\r\n");
-            return;
-        }
-
-        lowpower_note_activity();
-    }
-
     if (!lowpower_idle_timer_allowed()) {
-        lowpower_disarm_idle_timer();
+        if (g_lowpower_state.idle_timer_active &&
+            !g_lowpower_state.pending) {
+            g_lowpower_state.idle_started_tick = HAL_GetTick();
+        }
         return;
     }
 
-    if (!g_lowpower_state.idle_timer_armed ||
-        g_lowpower_state.idle_timer_rearm_requested) {
-        RTC_Status_t status = lowpower_program_rtc_idle_timer();
-        if (status == RTC_OK) {
-            g_lowpower_state.idle_timer_armed = true;
-            g_lowpower_state.idle_timer_rearm_requested = false;
-        } else {
-            shell_printf("[lowpower] RTC idle timer setup failed (err=%d)\r\n",
-                         status);
-            lowpower_note_activity();
+    if (lowpower_idle_elapsed_ms() >= g_lowpower_state.idle_timeout_ms) {
+        g_lowpower_state.quiet_sleep_entry =
+            (g_lowpower_state.idle_timeout_ms == LOWPOWER_RTC_RETURN_TIMEOUT_MS);
+        g_lowpower_state.pending = true;
+        g_lowpower_state.idle_timer_active = false;
+        if (!g_lowpower_state.quiet_sleep_entry) {
+            shell_print("[lowpower] Idle timer expired\r\n");
         }
     }
 }
@@ -686,8 +666,8 @@ bool lowpower_prepare_for_sleep(void)
     g_lowpower_state.filesystem_was_mounted = filesystem_is_mounted();
     g_lowpower_state.sd_power_was_enabled = (HAL_GPIO_ReadPin(SD_PWR_GPIO_Port, SD_PWR_Pin) == GPIO_PIN_SET);
     g_lowpower_state.profile_peripherals_were_up = g_lowpower_state.profile_peripherals_up;
-    g_lowpower_state.idle_timer_armed = false;
-    g_lowpower_state.idle_timer_rearm_requested = false;
+    g_lowpower_state.idle_timer_active = false;
+    g_lowpower_state.idle_timeout_ms = LOWPOWER_IDLE_TIMEOUT_MS;
 
     RTC_Status_t rtc_status = lowpower_program_rtc_wake_timer();
     if (rtc_status != RTC_OK) {
@@ -769,8 +749,12 @@ void lowpower_service(void)
     }
 
     g_lowpower_state.pending = false;
+    bool quiet_sleep_entry = g_lowpower_state.quiet_sleep_entry;
+    g_lowpower_state.quiet_sleep_entry = false;
 
-    shell_print("[lowpower] Preparing peripherals for sleep...\r\n");
+    if (!quiet_sleep_entry) {
+        shell_print("[lowpower] Preparing peripherals for sleep...\r\n");
+    }
     if (!lowpower_prepare_for_sleep()) {
         lowpower_enter_idle();
         shell_print(SHELL_PROMPT);
@@ -802,12 +786,14 @@ void lowpower_service(void)
     (void)lowpower_stop_rtc_countdown();
 
     lowpower_restore_from_sleep();
+    HAL_IWDG_Refresh(&hiwdg);
 
     if (g_app.start_flag) {
         lowpower_note_activity();
         shell_print("\r\n");
     } else if (rtc_wake) {
-        lowpower_enter_idle();
+        g_app.mode = SYS_MODE_IDLE;
+        lowpower_start_idle_timer(LOWPOWER_RTC_RETURN_TIMEOUT_MS);
     } else {
         lowpower_enter_idle();
         shell_print("[lowpower] Woke from sleep.\r\n");

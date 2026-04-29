@@ -688,7 +688,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : RECORD_TRIGGER_Pin */
   GPIO_InitStruct.Pin = RECORD_TRIGGER_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_EVT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(RECORD_TRIGGER_GPIO_Port, &GPIO_InitStruct);
 
