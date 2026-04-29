@@ -304,6 +304,21 @@ static void enter_normalization(void)
                  NORM_SAMPLES);
 }
 
+static bool false_start_window_cleared(void)
+{
+    return sample_count > FALSE_START_SAMPLES && g_profile.count > FALSE_START_SAMPLES;
+}
+
+static void discard_uncleared_false_start(void)
+{
+    uint16_t records = g_profile.count;
+
+    g_profile.count = 0;
+    shell_printf("[recorder] False start - only %u records; recording discarded\r\n",
+                 records);
+    return_to_idle();
+}
+
 /* Public functions ----------------------------------------------------------*/
 
 void recorder_init(void)
@@ -387,6 +402,10 @@ void recorder_service(void)
         /* Check if active-low PB8 released HIGH — stop recording, enter normalization */
         if (pb8_inactive_debounced()) {
             shell_printf("[recorder] PB8 HIGH after %u records\r\n", g_profile.count);
+            if (!false_start_window_cleared()) {
+                discard_uncleared_false_start();
+                return;
+            }
             enter_normalization();
             return;
         }
@@ -433,7 +452,11 @@ void recorder_service(void)
 
         if (pb8_inactive_debounced()) {
             shell_printf("[recorder] PB8 HIGH after timeout\r\n");
-            enter_normalization();
+            if (false_start_window_cleared()) {
+                enter_normalization();
+            } else {
+                discard_uncleared_false_start();
+            }
         }
         break;
 
@@ -446,6 +469,14 @@ void recorder_service(void)
             norm_count++;
 
             if (norm_count >= NORM_SAMPLES) {
+                if (!false_start_window_cleared()) {
+                    shell_printf("[recorder] CSV skipped - only %u records\r\n",
+                                 sample_count);
+                    g_profile.count = 0;
+                    return_to_idle();
+                    return;
+                }
+
                 /* Build the realtime response from RAM before touching SD so
                  * the client can still retrieve the profile even if the SD
                  * flush fails. */
