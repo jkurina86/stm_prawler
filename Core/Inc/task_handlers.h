@@ -46,6 +46,8 @@ void handle_help(const void *arg);
 void handle_clear(const void *arg);
 void handle_status(const void *arg);
 void handle_lowpower(const void *arg);
+void handle_stayawake(const void *arg);
+void handle_lowpower_timer(const void *arg);
 void handle_version(const void *arg);
 /* RTC */
 void handle_settime(const void *arg);

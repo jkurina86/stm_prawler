@@ -58,6 +58,8 @@ void cmd_help(int argc, char **argv);
 void cmd_clear(int argc, char **argv);
 void cmd_status(int argc, char **argv);
 void cmd_lowpower(int argc, char **argv);
+void cmd_stayawake(int argc, char **argv);
+void cmd_lowpower_timer(int argc, char **argv);
 void cmd_pb8(int argc, char **argv);
 void cmd_version(int argc, char **argv);
 /* RTC Command functions */

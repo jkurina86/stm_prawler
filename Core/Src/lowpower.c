@@ -45,6 +45,7 @@ typedef struct {
     bool profile_peripherals_up;
     bool profile_peripherals_were_up;
     bool quiet_sleep_entry;
+    bool idle_timer_enabled;
     volatile bool idle_timer_active;
     volatile uint32_t idle_started_tick;
     volatile uint32_t idle_timeout_ms;
@@ -247,6 +248,11 @@ static RTC_Status_t lowpower_program_rtc_wake_timer(void)
 
 static void lowpower_start_idle_timer(uint32_t timeout_ms)
 {
+    if (!g_lowpower_state.idle_timer_enabled) {
+        g_lowpower_state.idle_timer_active = false;
+        return;
+    }
+
     g_lowpower_state.idle_started_tick = HAL_GetTick();
     g_lowpower_state.idle_timeout_ms = timeout_ms;
     g_lowpower_state.idle_timer_active = true;
@@ -503,6 +509,7 @@ void lowpower_rtc_spi_up(void)
 void lowpower_init(void)
 {
     memset(&g_lowpower_state, 0, sizeof(g_lowpower_state));
+    g_lowpower_state.idle_timer_enabled = true;
 }
 
 void lowpower_enter_idle(void)
@@ -515,6 +522,28 @@ void lowpower_note_activity(void)
 {
     g_lowpower_state.activity_generation++;
     lowpower_start_idle_timer(LOWPOWER_IDLE_TIMEOUT_MS);
+}
+
+void lowpower_stay_awake(void)
+{
+    g_lowpower_state.idle_timer_enabled = false;
+    g_lowpower_state.idle_timer_active = false;
+    g_lowpower_state.pending = false;
+    g_lowpower_state.quiet_sleep_entry = false;
+    g_lowpower_state.idle_timeout_ms = LOWPOWER_IDLE_TIMEOUT_MS;
+}
+
+void lowpower_restart_timer(void)
+{
+    g_lowpower_state.idle_timer_enabled = true;
+    g_lowpower_state.pending = false;
+    g_lowpower_state.quiet_sleep_entry = false;
+    lowpower_start_idle_timer(LOWPOWER_IDLE_TIMEOUT_MS);
+}
+
+bool lowpower_idle_timer_enabled(void)
+{
+    return g_lowpower_state.idle_timer_enabled;
 }
 
 uint32_t lowpower_idle_elapsed_ms(void)

@@ -146,6 +146,22 @@ void handle_lowpower(const void *arg)
     shell_print("[lowpower] Forced sleep requested\r\n");
 }
 
+void handle_stayawake(const void *arg)
+{
+    (void)arg;
+    lowpower_stay_awake();
+    shell_print("[lowpower] Automatic sleep timer disabled\r\n");
+    shell_print(SHELL_PROMPT);
+}
+
+void handle_lowpower_timer(const void *arg)
+{
+    (void)arg;
+    lowpower_restart_timer();
+    shell_print("[lowpower] Automatic sleep timer restarted (60 s)\r\n");
+    shell_print(SHELL_PROMPT);
+}
+
 /** @brief  Handle the "version" command
   * @param  arg: Pointer to arguments (not used)
   * @retval None
