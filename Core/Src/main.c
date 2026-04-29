@@ -142,7 +142,7 @@ int main(void)
                     GPIO_PIN_SET);
   HAL_Delay(5000);
 
-  shell_printf("System Initialization...\r\n");
+  shell_printf("\r\nSystem Initialization...\r\n");
 
   config_init();
   transceiver_init();

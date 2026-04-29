@@ -24,7 +24,7 @@
 
 #define LOWPOWER_IDLE_TIMEOUT_SECONDS 60UL
 #define LOWPOWER_IDLE_TIMEOUT_MS (LOWPOWER_IDLE_TIMEOUT_SECONDS * 1000UL)
-#define LOWPOWER_RTC_RETURN_TIMEOUT_MS 2000UL
+#define LOWPOWER_STOP2_RETURN_TIMEOUT_MS 2000UL
 #define LOWPOWER_RTC_WAKE_SECONDS 28UL
 
 /* External peripheral handles declared in main.c ---------------------------*/
@@ -48,6 +48,7 @@ typedef struct {
     volatile bool idle_timer_active;
     volatile uint32_t idle_started_tick;
     volatile uint32_t idle_timeout_ms;
+    volatile uint32_t activity_generation;
 } lowpower_state_t;
 
 static lowpower_state_t g_lowpower_state;
@@ -512,6 +513,7 @@ void lowpower_enter_idle(void)
 
 void lowpower_note_activity(void)
 {
+    g_lowpower_state.activity_generation++;
     lowpower_start_idle_timer(LOWPOWER_IDLE_TIMEOUT_MS);
 }
 
@@ -648,11 +650,11 @@ static void lowpower_service_idle_timer(void)
 
     if (lowpower_idle_elapsed_ms() >= g_lowpower_state.idle_timeout_ms) {
         g_lowpower_state.quiet_sleep_entry =
-            (g_lowpower_state.idle_timeout_ms == LOWPOWER_RTC_RETURN_TIMEOUT_MS);
+            (g_lowpower_state.idle_timeout_ms == LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
         g_lowpower_state.pending = true;
         g_lowpower_state.idle_timer_active = false;
         if (!g_lowpower_state.quiet_sleep_entry) {
-            shell_print("[lowpower] Idle timer expired\r\n");
+            shell_print("\r\n[lowpower] Idle timer expired\r\n");
         }
     }
 }
@@ -752,7 +754,9 @@ void lowpower_service(void)
     bool quiet_sleep_entry = g_lowpower_state.quiet_sleep_entry;
     g_lowpower_state.quiet_sleep_entry = false;
 
-    if (!quiet_sleep_entry) {
+    if (quiet_sleep_entry) {
+        shell_print("\r\nReturning to STOP2 \r\n");
+    } else {
         shell_print("[lowpower] Preparing peripherals for sleep...\r\n");
     }
     if (!lowpower_prepare_for_sleep()) {
@@ -784,19 +788,25 @@ void lowpower_service(void)
     }
 
     (void)lowpower_stop_rtc_countdown();
-
+    uint32_t activity_generation_before_restore =
+        g_lowpower_state.activity_generation;
     lowpower_restore_from_sleep();
     HAL_IWDG_Refresh(&hiwdg);
 
     if (g_app.start_flag) {
         lowpower_note_activity();
-        shell_print("\r\n");
+        shell_print("\r\n[lowpower] Woke from STOP2 (PB8)\r\n");
     } else if (rtc_wake) {
         g_app.mode = SYS_MODE_IDLE;
-        lowpower_start_idle_timer(LOWPOWER_RTC_RETURN_TIMEOUT_MS);
+        shell_print("\r\n[lowpower] Woke from STOP2 (RTC)\r\n");
+        shell_print(SHELL_PROMPT);
+        if (g_lowpower_state.activity_generation ==
+            activity_generation_before_restore) {
+            lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
+        }
     } else {
         lowpower_enter_idle();
-        shell_print("[lowpower] Woke from sleep.\r\n");
+        shell_print("\r\n[lowpower] Woke from STOP2 (unknown)\r\n");
         shell_print(SHELL_PROMPT);
     }
 }

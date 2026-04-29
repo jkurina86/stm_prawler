@@ -154,7 +154,7 @@ static bool sd_mount_for_flush(void)
     return true;
 }
 
-static void return_to_idle(void)
+static void return_to_idle(bool restore_wifi)
 {
     __HAL_GPIO_EXTI_CLEAR_IT(RECORD_TRIGGER_Pin);
     g_app.start_flag = false;
@@ -165,7 +165,9 @@ static void return_to_idle(void)
     debounce_active = false;
 
     lowpower_profile_peripherals_down();
-    lowpower_wifi_start();
+    if (restore_wifi) {
+        lowpower_wifi_start();
+    }
     lowpower_enter_idle();
 }
 
@@ -316,7 +318,7 @@ static void discard_uncleared_false_start(void)
     g_profile.count = 0;
     shell_printf("[recorder] False start - only %u records; recording discarded\r\n",
                  records);
-    return_to_idle();
+    return_to_idle(false);
 }
 
 /* Public functions ----------------------------------------------------------*/
@@ -374,7 +376,7 @@ void recorder_service(void)
 
         if (pb8_inactive_debounced()) {
             shell_print("[recorder] PB8 HIGH during bringup; recording canceled\r\n");
-            return_to_idle();
+            return_to_idle(false);
             return;
         }
 
@@ -425,7 +427,7 @@ void recorder_service(void)
                         /* No significant descent — discard in-RAM buffer. */
                         g_profile.count = 0;
                         shell_print("[recorder] False start — recording discarded\r\n");
-                        return_to_idle();
+                        return_to_idle(false);
                         return;
                     }
                     /* Passed false-start check — nothing to record yet; filename is
@@ -473,30 +475,26 @@ void recorder_service(void)
                     shell_printf("[recorder] CSV skipped - only %u records\r\n",
                                  sample_count);
                     g_profile.count = 0;
-                    return_to_idle();
+                    return_to_idle(false);
                     return;
                 }
-
-                /* Build the realtime response from RAM before touching SD so
-                 * the client can still retrieve the profile even if the SD
-                 * flush fails. */
-                realtime_comm_build(&g_profile);
 
                 /* Done sampling — power SD back up and flush the profile. */
                 if (!sd_mount_for_flush()) {
                     shell_print("[recorder] Profile data lost: SD restore failed\r\n");
-                    return_to_idle();
+                    return_to_idle(false);
                     return;
                 }
 
                 if (flush_profile_to_sd()) {
+                    realtime_comm_build(&g_profile);
                     shell_printf("[recorder] Complete. %u records in %s\r\n",
                                  g_profile.count, rec_filename);
+                    return_to_idle(true);
                 } else {
                     shell_print("[recorder] Flush failed\r\n");
+                    return_to_idle(false);
                 }
-
-                return_to_idle();
             }
         }
         break;
