@@ -25,7 +25,7 @@
 #define LOWPOWER_IDLE_TIMEOUT_SECONDS 60UL
 #define LOWPOWER_IDLE_TIMEOUT_MS (LOWPOWER_IDLE_TIMEOUT_SECONDS * 1000UL)
 #define LOWPOWER_STOP2_RETURN_TIMEOUT_MS 2000UL
-#define LOWPOWER_RTC_WAKE_SECONDS 28UL
+#define LOWPOWER_RTC_WAKE_SECONDS 10UL
 
 /* External peripheral handles declared in main.c ---------------------------*/
 extern SPI_HandleTypeDef hspi1;
@@ -49,7 +49,6 @@ typedef struct {
     volatile bool idle_timer_active;
     volatile uint32_t idle_started_tick;
     volatile uint32_t idle_timeout_ms;
-    volatile uint32_t activity_generation;
 } lowpower_state_t;
 
 static lowpower_state_t g_lowpower_state;
@@ -186,16 +185,6 @@ static void lowpower_enter_stop2_wfe(void)
     CLEAR_BIT(SCB->SCR, (uint32_t)SCB_SCR_SLEEPDEEP_Msk);
 }
 
-static bool lowpower_record_trigger_asserted(void)
-{
-    if (HAL_GPIO_ReadPin(RECORD_TRIGGER_GPIO_Port, RECORD_TRIGGER_Pin) != GPIO_PIN_RESET) {
-        return false;
-    }
-
-    g_app.start_flag = true;
-    return true;
-}
-
 static bool lowpower_take_pending_record_trigger(void)
 {
     if (__HAL_GPIO_EXTI_GET_IT(RECORD_TRIGGER_Pin) == RESET) {
@@ -209,9 +198,7 @@ static bool lowpower_take_pending_record_trigger(void)
 
 static bool lowpower_prepare_stop2_entry(bool *rtc_wake)
 {
-    if (lowpower_take_pending_record_trigger() ||
-        lowpower_record_trigger_asserted() ||
-        g_app.start_flag) {
+    if (lowpower_take_pending_record_trigger() || g_app.start_flag) {
         return false;
     }
 
@@ -227,9 +214,7 @@ static bool lowpower_prepare_stop2_entry(bool *rtc_wake)
     __DSB();
     __ISB();
 
-    if (lowpower_take_pending_record_trigger() ||
-        lowpower_record_trigger_asserted() ||
-        g_app.start_flag) {
+    if (lowpower_take_pending_record_trigger() || g_app.start_flag) {
         return false;
     }
 
@@ -520,7 +505,6 @@ void lowpower_enter_idle(void)
 
 void lowpower_note_activity(void)
 {
-    g_lowpower_state.activity_generation++;
     lowpower_start_idle_timer(LOWPOWER_IDLE_TIMEOUT_MS);
 }
 
@@ -756,8 +740,7 @@ void lowpower_restore_from_sleep(void)
 
     lowpower_config_output(CLK_OE_GPIO_Port, CLK_OE_Pin, GPIO_PIN_RESET);
 
-    /* WiFi stays down after STOP2 wake. Restart it only from explicit flows
-     * such as recorder completion or the wifi-up command. */
+    /* WiFi is restored by the wake handler for RTC duty-cycle wakes. */
     if (g_lowpower_state.filesystem_was_mounted && g_lowpower_state.sd_power_was_enabled) {
         FS_Result_t fs_status = filesystem_mount();
         if (fs_status != FS_OK && fs_status != FS_ALREADY_MOUNTED) {
@@ -805,8 +788,12 @@ void lowpower_service(void)
             HAL_ResumeTick();
             HAL_IWDG_Refresh(&hiwdg);
             (void)lowpower_take_pending_record_trigger();
-            (void)lowpower_record_trigger_asserted();
             rtc_wake = RTC_IsInterruptPending() || RTC_IsInterruptAsserted();
+            /* PB8 and PB10 are the only intended STOP2 event wake sources.
+             * If WFE returned and RTC is not asserted, treat it as the PB8 edge. */
+            if (!rtc_wake && !g_app.start_flag) {
+                g_app.start_flag = true;
+            }
         } else {
             HAL_ResumeTick();
             HAL_IWDG_Refresh(&hiwdg);
@@ -817,8 +804,6 @@ void lowpower_service(void)
     }
 
     (void)lowpower_stop_rtc_countdown();
-    uint32_t activity_generation_before_restore =
-        g_lowpower_state.activity_generation;
     lowpower_restore_from_sleep();
     HAL_IWDG_Refresh(&hiwdg);
 
@@ -828,11 +813,11 @@ void lowpower_service(void)
     } else if (rtc_wake) {
         g_app.mode = SYS_MODE_IDLE;
         shell_print("\r\n[lowpower] Woke from STOP2 (RTC)\r\n");
+        HAL_IWDG_Refresh(&hiwdg);
+        lowpower_wifi_start();
+        HAL_IWDG_Refresh(&hiwdg);
+        lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
         shell_print(SHELL_PROMPT);
-        if (g_lowpower_state.activity_generation ==
-            activity_generation_before_restore) {
-            lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
-        }
     } else {
         lowpower_enter_idle();
         shell_print("\r\n[lowpower] Woke from STOP2 (unknown)\r\n");

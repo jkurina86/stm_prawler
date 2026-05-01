@@ -409,6 +409,7 @@ void wifi_service(void)
                 }
                 if (wifi_command_defers_prompt(wifi_cmd_buf))
                     wifi_defer_prompt();
+                lowpower_note_activity();
                 shell_dispatch(wifi_cmd_buf);
                 wifi_cmd_pos = 0;
                 memset(wifi_cmd_buf, 0, sizeof(wifi_cmd_buf));

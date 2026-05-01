@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    recorder.c
   * @brief   PB8-triggered sensor logging with in-RAM buffering.
-  * @note    On PB8 falling edge, brings up the profile sensor path, powers
+  * @note    On PB8 rising edge, brings up the profile sensor path, powers
   *          WiFi down, and buffers every sample into a static profile_data_t.
   *          When normalization finishes, the SD is mounted only long enough
   *          to write the CSV, then the idle power policy is restored.
@@ -92,13 +92,13 @@ static bool pb8_take_start_request(void)
         pb8_last_state = current;
         pb8_state_valid = true;
     } else {
-        if (pb8_last_state == GPIO_PIN_SET && current == GPIO_PIN_RESET) {
+        if (pb8_last_state == GPIO_PIN_RESET && current == GPIO_PIN_SET) {
             requested = true;
         }
         pb8_last_state = current;
     }
 
-    if (!requested || current != GPIO_PIN_RESET) {
+    if (!requested) {
         return false;
     }
 
@@ -270,11 +270,11 @@ static void record_sample(uint32_t interval_ms)
 
 /**
  * @brief  Debounced PB8 inactive detection.
- * @retval true when PB8 has been continuously HIGH for DEBOUNCE_MS.
+ * @retval true when PB8 has been continuously LOW for DEBOUNCE_MS.
  */
 static bool pb8_inactive_debounced(void)
 {
-    if (pb8_read() != GPIO_PIN_SET) {
+    if (pb8_read() != GPIO_PIN_RESET) {
         debounce_active = false;
         return false;
     }
@@ -343,11 +343,11 @@ void recorder_service(void)
             break;
         }
 
-        /* Wait for active-low PB8 to remain LOW through debounce period */
+        /* Wait for active-high PB8 to remain HIGH through debounce period */
         if (debounce_active) {
-            if (pb8_read() != GPIO_PIN_RESET) {
+            if (pb8_read() != GPIO_PIN_SET) {
                 debounce_active = false;
-                pb8_sync_state();
+                shell_print("[recorder] PB8 rising edge did not hold HIGH through debounce\r\n");
                 break;
             }
             if ((HAL_GetTick() - debounce_tick) < DEBOUNCE_MS)
@@ -375,7 +375,7 @@ void recorder_service(void)
         pb8_discard_start_request();
 
         if (pb8_inactive_debounced()) {
-            shell_print("[recorder] PB8 HIGH during bringup; recording canceled\r\n");
+            shell_print("[recorder] PB8 LOW during bringup; recording canceled\r\n");
             return_to_idle(false);
             return;
         }
@@ -401,9 +401,9 @@ void recorder_service(void)
         break;
 
     case REC_RECORDING:
-        /* Check if active-low PB8 released HIGH — stop recording, enter normalization */
+        /* Check if active-high PB8 released LOW - stop recording, enter normalization */
         if (pb8_inactive_debounced()) {
-            shell_printf("[recorder] PB8 HIGH after %u records\r\n", g_profile.count);
+            shell_printf("[recorder] PB8 LOW after %u records\r\n", g_profile.count);
             if (!false_start_window_cleared()) {
                 discard_uncleared_false_start();
                 return;
@@ -437,7 +437,7 @@ void recorder_service(void)
 
             /* Recording timeout — max samples reached, wait for PB8 release */
             if (sample_count >= get_max_samples()) {
-                shell_printf("[recorder] Timeout at %u samples, waiting for PB8 HIGH\r\n",
+                shell_printf("[recorder] Timeout at %u samples, waiting for PB8 LOW\r\n",
                              sample_count);
                 debounce_active = false;
                 state = REC_TIMEOUT;
@@ -449,11 +449,11 @@ void recorder_service(void)
         break;
 
     case REC_TIMEOUT:
-        /* Wait for active-low PB8 to release HIGH before starting normalization */
+        /* Wait for active-high PB8 to release LOW before starting normalization */
         pb8_discard_start_request();
 
         if (pb8_inactive_debounced()) {
-            shell_printf("[recorder] PB8 HIGH after timeout\r\n");
+            shell_printf("[recorder] PB8 LOW after timeout\r\n");
             if (false_start_window_cleared()) {
                 enter_normalization();
             } else {
