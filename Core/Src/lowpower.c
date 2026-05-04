@@ -612,6 +612,13 @@ void lowpower_wifi_stop(void)
     lowpower_wifi_uart_down();
 }
 
+void lowpower_start_wifi_duty_cycle(void)
+{
+    g_app.mode = SYS_MODE_IDLE;
+    lowpower_wifi_start();
+    lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
+}
+
 bool lowpower_request_on(void)
 {
     if (g_lowpower_state.pending) {
@@ -811,12 +818,10 @@ void lowpower_service(void)
         lowpower_note_activity();
         shell_print("\r\n[lowpower] Woke from STOP2 (PB8)\r\n");
     } else if (rtc_wake) {
-        g_app.mode = SYS_MODE_IDLE;
         shell_print("\r\n[lowpower] Woke from STOP2 (RTC)\r\n");
         HAL_IWDG_Refresh(&hiwdg);
-        lowpower_wifi_start();
+        lowpower_start_wifi_duty_cycle();
         HAL_IWDG_Refresh(&hiwdg);
-        lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
         shell_print(SHELL_PROMPT);
     } else {
         lowpower_enter_idle();

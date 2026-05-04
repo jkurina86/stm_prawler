@@ -41,6 +41,12 @@ typedef enum {
     REC_NORMALIZING
 } rec_state_t;
 
+typedef enum {
+    REC_RETURN_WIFI_OFF,
+    REC_RETURN_WIFI_ON,
+    REC_RETURN_WIFI_DUTY_CYCLE
+} rec_return_policy_t;
+
 /* Private variables ---------------------------------------------------------*/
 static profile_data_t g_profile;
 
@@ -154,7 +160,7 @@ static bool sd_mount_for_flush(void)
     return true;
 }
 
-static void return_to_idle(bool restore_wifi)
+static void return_to_idle(rec_return_policy_t policy)
 {
     __HAL_GPIO_EXTI_CLEAR_IT(RECORD_TRIGGER_Pin);
     g_app.start_flag = false;
@@ -165,10 +171,14 @@ static void return_to_idle(bool restore_wifi)
     debounce_active = false;
 
     lowpower_profile_peripherals_down();
-    if (restore_wifi) {
+    if (policy == REC_RETURN_WIFI_ON) {
         lowpower_wifi_start();
+        lowpower_enter_idle();
+    } else if (policy == REC_RETURN_WIFI_DUTY_CYCLE) {
+        lowpower_start_wifi_duty_cycle();
+    } else {
+        lowpower_enter_idle();
     }
-    lowpower_enter_idle();
 }
 
 static int format_measurement_csv(char *buf, size_t buf_size,
@@ -318,7 +328,7 @@ static void discard_uncleared_false_start(void)
     g_profile.count = 0;
     shell_printf("[recorder] False start - only %u records; recording discarded\r\n",
                  records);
-    return_to_idle(false);
+    return_to_idle(REC_RETURN_WIFI_DUTY_CYCLE);
 }
 
 /* Public functions ----------------------------------------------------------*/
@@ -376,7 +386,7 @@ void recorder_service(void)
 
         if (pb8_inactive_debounced()) {
             shell_print("[recorder] PB8 LOW during bringup; recording canceled\r\n");
-            return_to_idle(false);
+            return_to_idle(REC_RETURN_WIFI_DUTY_CYCLE);
             return;
         }
 
@@ -427,7 +437,7 @@ void recorder_service(void)
                         /* No significant descent — discard in-RAM buffer. */
                         g_profile.count = 0;
                         shell_print("[recorder] False start — recording discarded\r\n");
-                        return_to_idle(false);
+                        return_to_idle(REC_RETURN_WIFI_DUTY_CYCLE);
                         return;
                     }
                     /* Passed false-start check — nothing to record yet; filename is
@@ -475,14 +485,15 @@ void recorder_service(void)
                     shell_printf("[recorder] CSV skipped - only %u records\r\n",
                                  sample_count);
                     g_profile.count = 0;
-                    return_to_idle(false);
+                    return_to_idle(REC_RETURN_WIFI_DUTY_CYCLE);
                     return;
                 }
 
                 /* Done sampling — power SD back up and flush the profile. */
                 if (!sd_mount_for_flush()) {
-                    shell_print("[recorder] Profile data lost: SD restore failed\r\n");
-                    return_to_idle(false);
+                    shell_print("[recorder] SD restore failed; building realtime data from RAM\r\n");
+                    realtime_comm_build(&g_profile);
+                    return_to_idle(REC_RETURN_WIFI_ON);
                     return;
                 }
 
@@ -490,10 +501,11 @@ void recorder_service(void)
                     realtime_comm_build(&g_profile);
                     shell_printf("[recorder] Complete. %u records in %s\r\n",
                                  g_profile.count, rec_filename);
-                    return_to_idle(true);
+                    return_to_idle(REC_RETURN_WIFI_ON);
                 } else {
-                    shell_print("[recorder] Flush failed\r\n");
-                    return_to_idle(false);
+                    shell_print("[recorder] Flush failed; building realtime data from RAM\r\n");
+                    realtime_comm_build(&g_profile);
+                    return_to_idle(REC_RETURN_WIFI_ON);
                 }
             }
         }

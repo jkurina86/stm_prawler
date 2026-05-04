@@ -23,7 +23,7 @@ PORT = "COM10"
 BAUD = 9600
 TIMEOUT = 0.05
 
-AP_SSID = "prawler"
+AP_SSID = "prawler2"
 AP_SECURITY = 0  # 0 = Open
 AP_IP = "192.168.10.1"
 TCP_PORT = 5000
@@ -32,10 +32,30 @@ CLIENT_MASK = "255.255.255.0"
 
 # Resilience settings
 KEEPALIVE_MS = 30000  # TCP keep-alive idle timeout (ms)
-RECONNECT_DELAY = 5  # Seconds to wait between reconnect attempts
+RECONNECT_DELAY = 0.25  # Small throttle after failed reconnect attempts
+JOIN_RETRY_DELAY = 1.0  # Let the module settle before another AP join
 MAX_RECONNECT_ATTEMPTS = 0  # 0 = unlimited
-AT_PROMPT_QUIET_MS = 100  # Extra quiet time after AT prompt at 9600 baud
+AT_PROMPT_QUIET_MS = 50  # Extra quiet time after AT prompt at 9600 baud
+CMD_PREDRAIN_QUIET_MS = 25
+CMD_PREDRAIN_TIMEOUT = 0.2
+RETRY_SETTLE_QUIET_MS = 150
+RETRY_SETTLE_TIMEOUT = 0.5
+TCP_CMD_TIMEOUT = 0.35
+PASSTHROUGH_CMD_TIMEOUT = 0.2
+JOIN_CMD_TIMEOUT = 12.0
+JOIN_DRAIN_QUIET_MS = 350
+JOIN_DRAIN_TIMEOUT = 2.0
+JOIN_STATUS_DELAY = 0.75
+JOIN_STATUS_TIMEOUT = 4.0
+JOIN_STATUS_CMD_TIMEOUT = 1.5
+POST_JOIN_DELAY = 0.0
+POST_PASSTHROUGH_FLUSH = 0.0
+SHELL_PROMPT_READ_WINDOW = 0.1
+AT_MODE_PROBE_TIMEOUT = 0.25
+RESET_BOOT_TIMEOUT = 3.0
 # --------------------------------------------------------------
+
+g_initial_shell_output = ""
 
 
 def _read_until_quiet(ser, quiet_ms=AT_PROMPT_QUIET_MS, timeout=2.0):
@@ -51,12 +71,12 @@ def _read_until_quiet(ser, quiet_ms=AT_PROMPT_QUIET_MS, timeout=2.0):
         elif time.time() >= quiet_deadline:
             break
         else:
-            time.sleep(0.02)
+            time.sleep(0.01)
     return buf.decode("ascii", errors="replace")
 
 
 def _read_until_prompt(ser, timeout, quiet_ms=AT_PROMPT_QUIET_MS):
-    """Read from serial until a prompt is seen and the stream goes quiet."""
+    """Read from serial until an AT response terminator goes quiet."""
     buf = b""
     deadline = time.time() + timeout
     quiet_deadline = None
@@ -64,24 +84,26 @@ def _read_until_prompt(ser, timeout, quiet_ms=AT_PROMPT_QUIET_MS):
         chunk = ser.read(ser.in_waiting or 1)
         if chunk:
             buf += chunk
-            if b"> " in buf:
+            if b"> " in buf or b"OK" in buf or b"ERROR" in buf:
                 quiet_deadline = time.time() + (quiet_ms / 1000.0)
         elif quiet_deadline is not None and time.time() >= quiet_deadline:
             break
         else:
-            time.sleep(0.02)
+            time.sleep(0.01)
     return buf.decode("ascii", errors="replace")
 
 
-def send_cmd(ser, cmd, timeout=5.0):
+def send_cmd(ser, cmd, timeout=2.0):
     """Send an AT command and wait for the response."""
-    _read_until_quiet(ser, quiet_ms=150, timeout=0.5)
+    _read_until_quiet(
+        ser, quiet_ms=CMD_PREDRAIN_QUIET_MS, timeout=CMD_PREDRAIN_TIMEOUT
+    )
     ser.reset_input_buffer()
     ser.write((cmd + "\r").encode())
     return _read_until_prompt(ser, timeout)
 
 
-def expect_ok(ser, cmd, label="", timeout=5.0):
+def expect_ok(ser, cmd, label="", timeout=2.0):
     """Send command and raise on ERROR response."""
     resp = send_cmd(ser, cmd, timeout=timeout)
     if "ERROR" in resp:
@@ -89,17 +111,88 @@ def expect_ok(ser, cmd, label="", timeout=5.0):
     return resp
 
 
-def expect_ok_retry(ser, cmd, label="", timeout=5.0):
+def expect_ok_retry(ser, cmd, label="", timeout=2.0):
     """Send an AT command, retrying once after delayed async output settles."""
     resp = send_cmd(ser, cmd, timeout=timeout)
     if "ERROR" not in resp:
         return resp
 
-    delayed = _read_until_quiet(ser, quiet_ms=750, timeout=3)
+    delayed = _read_until_quiet(
+        ser, quiet_ms=RETRY_SETTLE_QUIET_MS, timeout=RETRY_SETTLE_TIMEOUT
+    )
     resp = send_cmd(ser, cmd, timeout=timeout)
     if "ERROR" in resp:
         raise RuntimeError(f"[{label or cmd}] failed: {delayed}{resp}")
     return resp
+
+
+def compact_response(resp, limit=180):
+    """Format AT output for concise retry status lines."""
+    text = " ".join(resp.split())
+    if not text:
+        return "<no response>"
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
+def response_has_expected_ip(resp):
+    """Return True when a module response shows the configured client IP."""
+    return CLIENT_IP in resp
+
+
+def wait_for_join_status(ser, first_resp):
+    """Wait briefly for a join attempt to finish before retrying C0."""
+    combined = first_resp
+    deadline = time.time() + JOIN_STATUS_TIMEOUT
+
+    while time.time() < deadline:
+        if response_has_expected_ip(combined):
+            return True, combined
+        if "ERROR" in combined and "[JOIN" in combined:
+            return False, combined
+
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+
+        time.sleep(min(JOIN_STATUS_DELAY, remaining))
+        drained = _read_until_quiet(ser, quiet_ms=200, timeout=0.5)
+        if drained:
+            combined += drained
+            if response_has_expected_ip(combined):
+                return True, combined
+            if "ERROR" in combined and "[JOIN" in combined:
+                return False, combined
+
+        resp = send_cmd(
+            ser,
+            "C?",
+            timeout=min(JOIN_STATUS_CMD_TIMEOUT, max(0.2, deadline - time.time())),
+        )
+        resp += _read_until_quiet(ser, quiet_ms=200, timeout=0.5)
+        if resp:
+            combined += resp
+
+    return response_has_expected_ip(combined), combined
+
+
+def solicit_shell_prompt(ser):
+    """Send CRLF until the prawler shell prompt appears."""
+    data = b""
+    while True:
+        ser.write(b"\r\n")
+        ser.flush()
+
+        deadline = time.time() + SHELL_PROMPT_READ_WINDOW
+        while time.time() < deadline:
+            chunk = ser.read(ser.in_waiting or 1)
+            if chunk:
+                data += chunk
+                if b"$ " in data:
+                    return data.decode("ascii", errors="replace")
+            else:
+                time.sleep(0.01)
 
 
 def check_passthrough(ser):
@@ -113,7 +206,7 @@ def check_passthrough(ser):
     ser.reset_input_buffer()
     ser.write(b"\n")
     data = b""
-    deadline = time.time() + 0.5
+    deadline = time.time() + AT_MODE_PROBE_TIMEOUT
     while time.time() < deadline:
         data += ser.read(ser.in_waiting or 1)
         if b"$ " in data or b"> " in data:
@@ -137,7 +230,7 @@ def is_in_at_mode(ser):
     ser.reset_input_buffer()
     ser.write(b"\r")
     data = b""
-    deadline = time.time() + 0.5
+    deadline = time.time() + AT_MODE_PROBE_TIMEOUT
     while time.time() < deadline:
         data += ser.read(ser.in_waiting or 1)
         if b"> " in data or b"OK" in data:
@@ -154,13 +247,26 @@ def ensure_at_mode(ser):
         hard_reset(ser)
 
 
+def wait_for_at_prompt(ser, timeout=RESET_BOOT_TIMEOUT):
+    """Poll until the module accepts AT commands after reset."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        ser.reset_input_buffer()
+        ser.write(b"\r")
+        resp = _read_until_prompt(ser, timeout=0.4)
+        if "OK" in resp or "> " in resp:
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def hard_reset(ser):
     """Software-reset the local ISM4343 module and wait for boot."""
     print("[local] Resetting module...")
-    send_cmd(ser, "ZR", timeout=5)
-    time.sleep(3)
+    send_cmd(ser, "ZR", timeout=2)
     ser.reset_input_buffer()
-    send_cmd(ser, "", timeout=2)
+    if not wait_for_at_prompt(ser):
+        raise RuntimeError("Module did not return to AT prompt after reset")
 
 
 def setup_station(ser):
@@ -183,46 +289,77 @@ def setup_station(ser):
     # Disable power save to keep the radio active during idle periods.
     expect_ok(ser, "ZP=1,0", "Disable Power Save")
 
-    resp = send_cmd(ser, "C0", timeout=20)
-    resp += _read_until_quiet(ser, quiet_ms=500, timeout=4)
-    if "ERROR" in resp and "Already connected" not in resp:
-        raise RuntimeError(f"Failed to join AP: {resp}")
-    if "0.0.0.0" in resp or CLIENT_IP not in resp:
-        raise RuntimeError(f"Joined AP without expected IP {CLIENT_IP}: {resp}")
-    print(f"[local] Joined AP.")
+    attempt = 0
+    while True:
+        attempt += 1
+        resp = send_cmd(ser, "C0", timeout=JOIN_CMD_TIMEOUT)
+        resp += _read_until_quiet(
+            ser, quiet_ms=JOIN_DRAIN_QUIET_MS, timeout=JOIN_DRAIN_TIMEOUT
+        )
 
-    resp = send_cmd(ser, "C?", timeout=5)
-    resp += _read_until_quiet(ser, quiet_ms=250, timeout=1)
-    print(f"[local] Network info:\n{resp}")
+        if response_has_expected_ip(resp):
+            print("[local] Joined AP.")
+            break
+
+        joined, status = wait_for_join_status(ser, resp)
+        if joined:
+            print("[local] Joined AP.")
+            break
+
+        if "ERROR" in status and "Already connected" not in status:
+            print(
+                f"[local] Join attempt {attempt} failed: "
+                f"{compact_response(status)}"
+            )
+        else:
+            print(
+                f"[local] Join attempt {attempt} missing expected IP "
+                f"{CLIENT_IP}: {compact_response(status)}"
+            )
+
+        time.sleep(JOIN_RETRY_DELAY)
+
+    resp = send_cmd(ser, "C?", timeout=TCP_CMD_TIMEOUT)
+    resp += _read_until_quiet(ser, quiet_ms=100, timeout=0.2)
+    if resp.strip():
+        print(f"[local] Network info:\n{resp}")
 
 
 def setup_tcp_client(ser):
     """Connect to the prawler board's TCP server and enter passthrough."""
+    global g_initial_shell_output
+
     print(f"[local] Connecting to {AP_IP}:{TCP_PORT}...")
-    expect_ok_retry(ser, "P0=0", "Set Socket 0")
-    expect_ok_retry(ser, "P1=0", "Set Protocol TCP")
-    expect_ok_retry(ser, f"P3={AP_IP}", "Set Remote Host IP")
-    expect_ok_retry(ser, f"P4={TCP_PORT}", "Set Remote Port")
-    expect_ok_retry(ser, "S1=1460", "Set Write Packet Size")
-    expect_ok_retry(ser, "S2=50", "Set Write Timeout")
+    expect_ok_retry(ser, "P0=0", "Set Socket 0", timeout=TCP_CMD_TIMEOUT)
+    expect_ok_retry(ser, "P1=0", "Set Protocol TCP", timeout=TCP_CMD_TIMEOUT)
+    expect_ok_retry(ser, f"P3={AP_IP}", "Set Remote Host IP", timeout=TCP_CMD_TIMEOUT)
+    expect_ok_retry(ser, f"P4={TCP_PORT}", "Set Remote Port", timeout=TCP_CMD_TIMEOUT)
+    expect_ok_retry(ser, "S1=1460", "Set Write Packet Size", timeout=TCP_CMD_TIMEOUT)
+    expect_ok_retry(ser, "S2=50", "Set Write Timeout", timeout=TCP_CMD_TIMEOUT)
 
     # Enable TCP keep-alive so the client detects a dead server
-    expect_ok_retry(ser, f"PK=1,{KEEPALIVE_MS}", "Enable TCP Keep-Alive")
+    expect_ok_retry(
+        ser, f"PK=1,{KEEPALIVE_MS}", "Enable TCP Keep-Alive", timeout=TCP_CMD_TIMEOUT
+    )
 
     # Enter client passthrough mode -- after this, serial port IS the TCP link.
     # Do not pre-start the API client with P6=1; the IWIN streaming example
     # starts client streaming directly with PX=1,0.
     print("[local] Entering passthrough mode...")
-    resp = send_cmd(ser, "PX=1,0", timeout=15)
+    resp = send_cmd(ser, "PX=1,0", timeout=PASSTHROUGH_CMD_TIMEOUT)
     if "ERROR" in resp:
-        delayed = _read_until_quiet(ser, quiet_ms=750, timeout=3)
-        resp = send_cmd(ser, "PX=1,0", timeout=15)
+        delayed = _read_until_quiet(
+            ser, quiet_ms=RETRY_SETTLE_QUIET_MS, timeout=RETRY_SETTLE_TIMEOUT
+        )
+        resp = send_cmd(ser, "PX=1,0", timeout=PASSTHROUGH_CMD_TIMEOUT)
         if "ERROR" in resp:
             raise RuntimeError(f"PX failed: {delayed}{resp}")
 
-    # Flush any residual AT response bytes
-    time.sleep(0.1)
+    # Flush residual AT response bytes, then immediately poke the remote shell.
+    if POST_PASSTHROUGH_FLUSH > 0:
+        time.sleep(POST_PASSTHROUGH_FLUSH)
     ser.reset_input_buffer()
+    g_initial_shell_output = solicit_shell_prompt(ser)
 
     print("[local] Passthrough active.")
 
@@ -235,7 +372,7 @@ def connect(ser):
     try:
         if not check_passthrough(ser):
             setup_station(ser)
-            time.sleep(1)
+            time.sleep(POST_JOIN_DELAY)
             setup_tcp_client(ser)
         return True
     except Exception as e:
@@ -253,8 +390,6 @@ def reconnect(ser):
     while MAX_RECONNECT_ATTEMPTS == 0 or attempt < MAX_RECONNECT_ATTEMPTS:
         attempt += 1
         print(f"\n[local] Reconnect attempt {attempt}...")
-        print(f"[local] Waiting {RECONNECT_DELAY}s before retry...")
-        time.sleep(RECONNECT_DELAY)
 
         try:
             # Make sure we're back in AT command mode.  If the module
@@ -265,12 +400,13 @@ def reconnect(ser):
                 hard_reset(ser)
 
             setup_station(ser)
-            time.sleep(1)
+            time.sleep(POST_JOIN_DELAY)
             setup_tcp_client(ser)
             print("[local] Reconnected successfully!")
             return True
         except Exception as e:
             print(f"[local] Reconnect attempt {attempt} failed: {e}")
+            time.sleep(RECONNECT_DELAY)
 
     print("[local] All reconnect attempts exhausted.")
     return False
@@ -320,6 +456,8 @@ def receiver_thread(ser, stop_event, disconnect_event):
 
 
 def main():
+    global g_initial_shell_output
+
     parser = argparse.ArgumentParser(
         description="Connect to STM-PRAWLER board over WiFi"
     )
@@ -362,9 +500,6 @@ def main():
             )
             rx.start()
 
-            # Send \n to solicit initial prompt from prawler
-            ser.write(b"\n")
-
             print()
             print("=" * 60)
             print("  Connected to prawler WiFi shell!")
@@ -373,6 +508,14 @@ def main():
             print("  Type 'quit' to exit.")
             print("=" * 60)
             print()
+
+            if g_initial_shell_output:
+                sys.stdout.write(g_initial_shell_output)
+                sys.stdout.flush()
+                g_initial_shell_output = ""
+            else:
+                ser.write(b"\r\n")
+                ser.flush()
 
             # Interactive loop -- also watches for disconnect
             session_active = True

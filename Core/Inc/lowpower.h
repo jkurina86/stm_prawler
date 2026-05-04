@@ -53,6 +53,7 @@ bool lowpower_rtc_begin(void);
 void lowpower_rtc_end(bool release_spi);
 void lowpower_wifi_start(void);
 void lowpower_wifi_stop(void);
+void lowpower_start_wifi_duty_cycle(void);
 bool lowpower_request_on(void);
 void lowpower_service(void);
 bool lowpower_is_pending(void);
