@@ -168,7 +168,7 @@ void realtime_comm_build(const profile_data_t *profile)
     (void)snprintf(len_ascii, sizeof(len_ascii), "%04X", csv_len);
 
     /* CRC covers the ASCII length field plus CSV payload bytes only. It does
-     * not cover the "@@@" preamble, CRC field, or newline after the length. */
+     * not cover the "@@@" preamble or CRC field. */
     crc_accum = rt_crc16_xmodem_update(crc_accum, (const uint8_t *)len_ascii, RT_LEN_ASCII_LEN);
 
     /* Add the CSV data to the CRC. */
@@ -205,10 +205,10 @@ void realtime_comm_stream(void)
     uint16_t sent = 0;
 
     /* Send the Preamble */
-    wifi_printf("@@@%04X%04X\n", rt_crc, rt_len);
+    wifi_printf("@@@%04X%04X", rt_crc, rt_len);
 
     /* Increment the sent-byte counter */
-    sent += 3U + 4U + 4U + 1U;
+    sent += 3U + 4U + 4U;
 
     /* Send the CSV Data */
     sent += wifi_write((const uint8_t *)rt_buf, rt_len);
