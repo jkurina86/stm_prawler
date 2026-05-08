@@ -154,6 +154,23 @@ void handle_stayawake(const void *arg)
     shell_print(SHELL_PROMPT);
 }
 
+void handle_debug_mode(const void *arg)
+{
+    (void)arg;
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[debug] Debug mode is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
+        shell_print(SHELL_PROMPT);
+        return;
+    }
+
+    lowpower_stay_awake();
+    lowpower_profile_peripherals_up();
+    shell_print("[debug] Automatic sleep timer disabled; sensor interfaces powered\r\n");
+    shell_print(SHELL_PROMPT);
+}
+
 void handle_lowpower_timer(const void *arg)
 {
     (void)arg;

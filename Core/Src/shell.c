@@ -55,6 +55,7 @@ const shell_command_t shell_commands[] = {
     {"status", "Show system status", cmd_status},
     {"lowpower", "Force low-power sleep mode", cmd_lowpower},
     {"stayawake", "Disable automatic low-power timer", cmd_stayawake},
+    {"debug-mode", "Disable sleep and power sensor interfaces", cmd_debug_mode},
     {"lowpower-timer", "Restart automatic low-power timer", cmd_lowpower_timer},
     {"pb8", "Show PB8 pin state", cmd_pb8},
     {"version", "Show firmware version", cmd_version},
@@ -377,6 +378,16 @@ void cmd_stayawake(int argc, char **argv)
     (void)argc; (void)argv;
     shell_defer_prompt();
     if (!tasker_enqueue(handle_stayawake, NULL, 0)) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
+}
+
+void cmd_debug_mode(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_debug_mode, NULL, 0)) {
         shell_print("Task queue full\r\n");
         shell_print(SHELL_PROMPT);
     }
