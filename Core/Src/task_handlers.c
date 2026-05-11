@@ -124,6 +124,7 @@ void handle_status(const void *arg)
     shell_printf("WetLab:     %s\r\n", periph_names[g_app.wetlab_status]);
     shell_printf("WiFi:       %s\r\n", wifi_names[g_app.wifi_state]);
     shell_printf("Sensors:    level %u\r\n", g_app.sensor_level);
+    shell_printf("Samplerate: %lu ms\r\n", (unsigned long)config_get_samplerate_ms());
 }
 
 void handle_lowpower(const void *arg)
@@ -542,6 +543,21 @@ void handle_config(const void *arg)
             default:                    shell_print(" (unknown)\r\n"); break;
         }
     }
+}
+
+void handle_samplerate(const void *arg)
+{
+    uint32_t samplerate_ms = *(const uint32_t *)arg;
+
+    if (samplerate_ms != 0U) {
+        samplerate_ms = config_set_samplerate_ms(samplerate_ms);
+        shell_printf("Samplerate set to %lu ms\r\n", (unsigned long)samplerate_ms);
+    } else {
+        samplerate_ms = config_get_samplerate_ms();
+        shell_printf("Samplerate: %lu ms\r\n", (unsigned long)samplerate_ms);
+    }
+
+    shell_print(SHELL_PROMPT);
 }
 
 /* File System Handlers ---------------------------------------------------*/

@@ -85,6 +85,7 @@ const shell_command_t shell_commands[] = {
 
     /* Config */
     {"config", "Get/set sensor config (1-3)", cmd_config},
+    {"samplerate", "Get/set sample interval seconds (4-60)", cmd_samplerate},
 
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
@@ -615,6 +616,28 @@ void cmd_config(int argc, char **argv)
     }
 
     tasker_enqueue(handle_config, &args, sizeof(args));
+}
+
+void cmd_samplerate(int argc, char **argv)
+{
+    uint32_t samplerate_ms = 0;
+
+    if (argc >= 2) {
+        int seconds = atoi(argv[1]);
+        if (seconds < (int)SAMPLE_RATE_MIN_SECONDS) {
+            seconds = (int)SAMPLE_RATE_MIN_SECONDS;
+        } else if (seconds > (int)SAMPLE_RATE_MAX_SECONDS) {
+            seconds = (int)SAMPLE_RATE_MAX_SECONDS;
+        }
+
+        samplerate_ms = (uint32_t)seconds * 1000UL;
+    }
+
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_samplerate, &samplerate_ms, sizeof(samplerate_ms))) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
 }
 
 /* WiFi Commands ---------------------------------------------------*/

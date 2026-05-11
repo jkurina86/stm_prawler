@@ -24,9 +24,8 @@
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define SAMPLE_INTERVAL       4000  /* ms between samples */
 #define TOLERANCE             0.5f  /* Depth tolerance (dbar) */
-#define FALSE_START_SAMPLES   15    /* Validation window: 15 × 4s = 60s */
+#define FALSE_START_SAMPLES   5    /* Validation window sample count */
 #define NORM_INTERVAL         20000 /* ms between normalization samples */
 #define NORM_SAMPLES          PROFILE_NORM_SAMPLES
 #define DEBOUNCE_MS           100   /* PB8 debounce period */
@@ -398,9 +397,9 @@ void recorder_service(void)
 
             /* Take an immediate probe sample for false-start detection only.
              * Do not append it to g_profile; the first recorded sample is the
-             * first scheduled SAMPLE_INTERVAL measurement. */
+             * first scheduled samplerate measurement. */
             sensors_sample(&reading);
-            next_sample_tick = HAL_GetTick() + SAMPLE_INTERVAL;
+            next_sample_tick = HAL_GetTick() + config_get_samplerate_ms();
             sample_count = 0;
             start_time = HAL_GetTick();
             initial_depth = reading.ctd.pressure;
@@ -424,7 +423,7 @@ void recorder_service(void)
 
         /* Time for next sample? */
         if ((HAL_GetTick() - next_sample_tick) < 0x80000000UL) {
-            record_sample(SAMPLE_INTERVAL);
+            record_sample(config_get_samplerate_ms());
             sample_count++;
 
             /* False start detection during validation window */

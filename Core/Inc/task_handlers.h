@@ -75,6 +75,7 @@ void handle_sensors(const void *arg);
 
 /* Config */
 void handle_config(const void *arg);
+void handle_samplerate(const void *arg);
 
 /* WiFi */
 void handle_wifi_status(const void *arg);

@@ -55,6 +55,12 @@ static lowpower_state_t g_lowpower_state;
 
 /* Private helpers ----------------------------------------------------------*/
 
+/**
+ * @brief Drive GPIO pins and configure them as low-speed push-pull outputs.
+ * @param port GPIO port containing the pins.
+ * @param pins GPIO pin mask to configure.
+ * @param state Output state to drive before configuring the pins.
+ */
 static void lowpower_config_output(GPIO_TypeDef *port, uint16_t pins, GPIO_PinState state)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -68,6 +74,12 @@ static void lowpower_config_output(GPIO_TypeDef *port, uint16_t pins, GPIO_PinSt
     HAL_GPIO_Init(port, &gpio);
 }
 
+/**
+ * @brief Configure GPIO pins as analog inputs for low-leakage idle state.
+ * @param port GPIO port containing the pins.
+ * @param pins GPIO pin mask to configure.
+ * @param pull GPIO pull configuration to apply.
+ */
 static void lowpower_config_analog(GPIO_TypeDef *port, uint16_t pins, uint32_t pull)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -78,17 +90,26 @@ static void lowpower_config_analog(GPIO_TypeDef *port, uint16_t pins, uint32_t p
     HAL_GPIO_Init(port, &gpio);
 }
 
+/**
+ * @brief Restore the SD card SPI chip-select pin to its idle state.
+ */
 static void lowpower_restore_sd_cs_pin(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
     lowpower_config_output(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
 }
 
+/**
+ * @brief Restore the external RTC chip-enable pin to its idle state.
+ */
 static void lowpower_restore_rtc_ce_pin(void)
 {
     lowpower_config_output(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_RESET);
 }
 
+/**
+ * @brief Unmount the filesystem if FatFS is currently mounted.
+ */
 static void lowpower_unmount_filesystem(void)
 {
     if (filesystem_is_mounted()) {
@@ -96,6 +117,11 @@ static void lowpower_unmount_filesystem(void)
     }
 }
 
+/**
+ * @brief Program the external RTC countdown timer as a one-shot wake source.
+ * @param seconds Countdown interval in seconds.
+ * @return RTC_OK on success, otherwise an RTC_Status_t error code.
+ */
 static RTC_Status_t lowpower_program_rtc_countdown(uint16_t seconds)
 {
     RTC_Timer_t timer = {0};
@@ -136,6 +162,10 @@ static RTC_Status_t lowpower_program_rtc_countdown(uint16_t seconds)
     return status;
 }
 
+/**
+ * @brief Stop and clear the external RTC countdown timer wake source.
+ * @return RTC_OK on success, otherwise an RTC_Status_t error code.
+ */
 static RTC_Status_t lowpower_stop_rtc_countdown(void)
 {
     bool release_spi = lowpower_rtc_begin();
@@ -154,6 +184,9 @@ static RTC_Status_t lowpower_stop_rtc_countdown(void)
     return status;
 }
 
+/**
+ * @brief Clear peripheral NVIC pending bits that could immediately wake STOP2.
+ */
 static void lowpower_clear_stop2_pending_irqs(void)
 {
     HAL_NVIC_ClearPendingIRQ(SPI1_IRQn);
@@ -170,12 +203,18 @@ static void lowpower_clear_stop2_pending_irqs(void)
     SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk;
 }
 
+/**
+ * @brief Clear the ARM event latch before entering WFE sleep.
+ */
 static void lowpower_clear_event_latch(void)
 {
     __SEV();
     __WFE();
 }
 
+/**
+ * @brief Enter STOP2 using WFE and return when an event wakes the CPU.
+ */
 static void lowpower_enter_stop2_wfe(void)
 {
     MODIFY_REG(PWR->CR1, PWR_CR1_LPMS, PWR_CR1_LPMS_STOP2);
@@ -185,6 +224,10 @@ static void lowpower_enter_stop2_wfe(void)
     CLEAR_BIT(SCB->SCR, (uint32_t)SCB_SCR_SLEEPDEEP_Msk);
 }
 
+/**
+ * @brief Consume a pending PB8 record-trigger EXTI event.
+ * @return true if a pending trigger was consumed, otherwise false.
+ */
 static bool lowpower_take_pending_record_trigger(void)
 {
     if (__HAL_GPIO_EXTI_GET_IT(RECORD_TRIGGER_Pin) == RESET) {
@@ -196,6 +239,11 @@ static bool lowpower_take_pending_record_trigger(void)
     return true;
 }
 
+/**
+ * @brief Clear stale wake state and verify STOP2 entry is still safe.
+ * @param rtc_wake Set true when the RTC wake line is already pending or asserted.
+ * @return true if STOP2 can be entered, otherwise false.
+ */
 static bool lowpower_prepare_stop2_entry(bool *rtc_wake)
 {
     if (lowpower_take_pending_record_trigger() || g_app.start_flag) {
@@ -226,11 +274,19 @@ static bool lowpower_prepare_stop2_entry(bool *rtc_wake)
     return true;
 }
 
+/**
+ * @brief Program the standard RTC wake timer used for STOP2 sleep windows.
+ * @return RTC_OK on success, otherwise an RTC_Status_t error code.
+ */
 static RTC_Status_t lowpower_program_rtc_wake_timer(void)
 {
     return lowpower_program_rtc_countdown((uint16_t)LOWPOWER_RTC_WAKE_SECONDS);
 }
 
+/**
+ * @brief Start or restart the SysTick-based idle timer.
+ * @param timeout_ms Idle timeout in milliseconds.
+ */
 static void lowpower_start_idle_timer(uint32_t timeout_ms)
 {
     if (!g_lowpower_state.idle_timer_enabled) {
@@ -245,6 +301,9 @@ static void lowpower_start_idle_timer(uint32_t timeout_ms)
 
 /* Individual peripheral / pin-group helpers -------------------------------*/
 
+/**
+ * @brief Deinitialize the shell UART and park its pins for low power.
+ */
 void lowpower_shell_uart_down(void)
 {
     HAL_UART_AbortReceive_IT(&huart1);
@@ -255,6 +314,9 @@ void lowpower_shell_uart_down(void)
     lowpower_config_analog(GPIOA, GPIO_PIN_11 | GPIO_PIN_12, GPIO_NOPULL);
 }
 
+/**
+ * @brief Restore the shell UART and resume interrupt-driven shell RX.
+ */
 void lowpower_shell_uart_up(void)
 {
     huart1.Instance = USART1;
@@ -275,6 +337,9 @@ void lowpower_shell_uart_up(void)
     shell_resume_rx();
 }
 
+/**
+ * @brief Deinitialize the optode UART path and mark the optode off.
+ */
 void lowpower_optode_uart_down(void)
 {
     HAL_UART_Abort(&huart2);
@@ -285,6 +350,9 @@ void lowpower_optode_uart_down(void)
     g_app.optode_status = PERIPH_OFF;
 }
 
+/**
+ * @brief Restore the optode UART path and initialize the optode driver.
+ */
 void lowpower_optode_uart_up(void)
 {
     huart2.Instance = USART2;
@@ -308,6 +376,9 @@ void lowpower_optode_uart_up(void)
     g_app.optode_status = PERIPH_READY;
 }
 
+/**
+ * @brief Deinitialize the CTD UART path and mark the CTD off.
+ */
 void lowpower_ctd_uart_down(void)
 {
     HAL_UART_Abort(&huart3);
@@ -318,6 +389,9 @@ void lowpower_ctd_uart_down(void)
     g_app.ctd_status = PERIPH_OFF;
 }
 
+/**
+ * @brief Restore the CTD UART path and initialize the CTD driver.
+ */
 void lowpower_ctd_uart_up(void)
 {
     huart3.Instance = USART3;
@@ -340,6 +414,9 @@ void lowpower_ctd_uart_up(void)
     g_app.ctd_status = PERIPH_READY;
 }
 
+/**
+ * @brief Power down the WiFi UART/module path and park its pins.
+ */
 void lowpower_wifi_uart_down(void)
 {
     wifi_down();
@@ -351,6 +428,9 @@ void lowpower_wifi_uart_down(void)
     lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_PULLDOWN);
 }
 
+/**
+ * @brief Restore the WiFi UART pins and module control lines.
+ */
 void lowpower_wifi_uart_up(void)
 {
     huart4.Instance = UART4;
@@ -372,6 +452,9 @@ void lowpower_wifi_uart_up(void)
     lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
 }
 
+/**
+ * @brief Deinitialize the WetLab UART path and mark WetLab off.
+ */
 void lowpower_wetlab_uart_down(void)
 {
     HAL_UART_Abort(&huart5);
@@ -383,6 +466,9 @@ void lowpower_wetlab_uart_down(void)
     g_app.wetlab_status = PERIPH_OFF;
 }
 
+/**
+ * @brief Restore the WetLab UART path and initialize the WetLab driver.
+ */
 void lowpower_wetlab_uart_up(void)
 {
     huart5.Instance = UART5;
@@ -405,6 +491,9 @@ void lowpower_wetlab_uart_up(void)
     g_app.wetlab_status = PERIPH_READY;
 }
 
+/**
+ * @brief Power down the SD card SPI path and reset filesystem/disk state.
+ */
 void lowpower_sd_spi_down(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -420,6 +509,9 @@ void lowpower_sd_spi_down(void)
     g_app.sd_status = PERIPH_OFF;
 }
 
+/**
+ * @brief Power up and reinitialize the SD card SPI path.
+ */
 void lowpower_sd_spi_up(void)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -454,6 +546,9 @@ void lowpower_sd_spi_up(void)
     HAL_Delay(100);
 }
 
+/**
+ * @brief Deinitialize the external RTC SPI path and park its pins.
+ */
 void lowpower_rtc_spi_down(void)
 {
     lowpower_restore_rtc_ce_pin();
@@ -463,6 +558,9 @@ void lowpower_rtc_spi_down(void)
     lowpower_config_analog(GPIOB, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_NOPULL);
 }
 
+/**
+ * @brief Restore and reinitialize the external RTC SPI path.
+ */
 void lowpower_rtc_spi_up(void)
 {
     lowpower_restore_rtc_ce_pin();
@@ -491,23 +589,35 @@ void lowpower_rtc_spi_up(void)
 
 /* Aggregated low-power flow ------------------------------------------------*/
 
+/**
+ * @brief Initialize low-power module state.
+ */
 void lowpower_init(void)
 {
     memset(&g_lowpower_state, 0, sizeof(g_lowpower_state));
     g_lowpower_state.idle_timer_enabled = true;
 }
 
+/**
+ * @brief Put the application in idle mode and arm the idle sleep timer.
+ */
 void lowpower_enter_idle(void)
 {
     g_app.mode = SYS_MODE_IDLE;
     lowpower_note_activity();
 }
 
+/**
+ * @brief Record foreground activity and restart the normal idle timer.
+ */
 void lowpower_note_activity(void)
 {
     lowpower_start_idle_timer(LOWPOWER_IDLE_TIMEOUT_MS);
 }
 
+/**
+ * @brief Disable automatic idle sleep until the timer is explicitly restarted.
+ */
 void lowpower_stay_awake(void)
 {
     g_lowpower_state.idle_timer_enabled = false;
@@ -517,6 +627,9 @@ void lowpower_stay_awake(void)
     g_lowpower_state.idle_timeout_ms = LOWPOWER_IDLE_TIMEOUT_MS;
 }
 
+/**
+ * @brief Re-enable and restart the normal automatic idle sleep timer.
+ */
 void lowpower_restart_timer(void)
 {
     g_lowpower_state.idle_timer_enabled = true;
@@ -525,11 +638,19 @@ void lowpower_restart_timer(void)
     lowpower_start_idle_timer(LOWPOWER_IDLE_TIMEOUT_MS);
 }
 
+/**
+ * @brief Report whether the automatic idle sleep timer is enabled.
+ * @return true if the idle timer is enabled, otherwise false.
+ */
 bool lowpower_idle_timer_enabled(void)
 {
     return g_lowpower_state.idle_timer_enabled;
 }
 
+/**
+ * @brief Get elapsed time for the currently active idle timer.
+ * @return Elapsed idle time in milliseconds, or 0 if the timer is inactive.
+ */
 uint32_t lowpower_idle_elapsed_ms(void)
 {
     if (!g_lowpower_state.idle_timer_active) {
@@ -539,6 +660,9 @@ uint32_t lowpower_idle_elapsed_ms(void)
     return HAL_GetTick() - g_lowpower_state.idle_started_tick;
 }
 
+/**
+ * @brief Power down peripherals that should remain off during idle.
+ */
 void lowpower_idle_peripherals_down(void)
 {
     lowpower_unmount_filesystem();
@@ -550,6 +674,9 @@ void lowpower_idle_peripherals_down(void)
     g_lowpower_state.profile_peripherals_up = false;
 }
 
+/**
+ * @brief Bring up the sensor profile peripheral set and stop WiFi access.
+ */
 void lowpower_profile_peripherals_up(void)
 {
     if (g_lowpower_state.profile_peripherals_up) {
@@ -567,6 +694,9 @@ void lowpower_profile_peripherals_up(void)
     g_lowpower_state.profile_peripherals_up = true;
 }
 
+/**
+ * @brief Power down the sensor profile peripheral set.
+ */
 void lowpower_profile_peripherals_down(void)
 {
     lowpower_unmount_filesystem();
@@ -579,11 +709,20 @@ void lowpower_profile_peripherals_down(void)
     g_lowpower_state.profile_peripherals_up = false;
 }
 
+/**
+ * @brief Report whether the sensor profile peripheral set is powered.
+ * @return true if profile peripherals are up, otherwise false.
+ */
 bool lowpower_profile_peripherals_are_up(void)
 {
     return g_lowpower_state.profile_peripherals_up;
 }
 
+/**
+ * @brief Temporarily acquire external RTC SPI access outside profile ownership.
+ * @return true if the caller should release SPI with lowpower_rtc_end(), false
+ *         if profile power already owns SPI2.
+ */
 bool lowpower_rtc_begin(void)
 {
     if (g_lowpower_state.profile_peripherals_up) {
@@ -594,6 +733,10 @@ bool lowpower_rtc_begin(void)
     return true;
 }
 
+/**
+ * @brief Release external RTC SPI access acquired by lowpower_rtc_begin().
+ * @param release_spi true to power SPI2 back down, false to leave profile-owned SPI2 up.
+ */
 void lowpower_rtc_end(bool release_spi)
 {
     if (release_spi) {
@@ -601,17 +744,26 @@ void lowpower_rtc_end(bool release_spi)
     }
 }
 
+/**
+ * @brief Power up UART4 and initialize the WiFi module/service.
+ */
 void lowpower_wifi_start(void)
 {
     lowpower_wifi_uart_up();
     wifi_init(&huart4);
 }
 
+/**
+ * @brief Stop the WiFi module/service and power down UART4.
+ */
 void lowpower_wifi_stop(void)
 {
     lowpower_wifi_uart_down();
 }
 
+/**
+ * @brief Restore WiFi after an RTC wake and arm the short return-to-STOP2 timer.
+ */
 void lowpower_start_wifi_duty_cycle(void)
 {
     g_app.mode = SYS_MODE_IDLE;
@@ -619,6 +771,10 @@ void lowpower_start_wifi_duty_cycle(void)
     lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
 }
 
+/**
+ * @brief Request low-power sleep from main-loop context.
+ * @return true if a new request was queued, false if one was already pending.
+ */
 bool lowpower_request_on(void)
 {
     if (g_lowpower_state.pending) {
@@ -630,11 +786,19 @@ bool lowpower_request_on(void)
     return true;
 }
 
+/**
+ * @brief Report whether a low-power sleep request is pending.
+ * @return true if sleep service work is pending, otherwise false.
+ */
 bool lowpower_is_pending(void)
 {
     return g_lowpower_state.pending;
 }
 
+/**
+ * @brief Check whether automatic idle sleep is currently allowed.
+ * @return true if the idle timer may request sleep, otherwise false.
+ */
 static bool lowpower_idle_timer_allowed(void)
 {
     if (!g_lowpower_state.idle_timer_active ||
@@ -654,6 +818,9 @@ static bool lowpower_idle_timer_allowed(void)
     return true;
 }
 
+/**
+ * @brief Service the automatic idle timer and request sleep when it expires.
+ */
 static void lowpower_service_idle_timer(void)
 {
     if (g_lowpower_state.prepared) {
@@ -679,6 +846,10 @@ static void lowpower_service_idle_timer(void)
     }
 }
 
+/**
+ * @brief Save active power state and shut peripherals down for STOP2 entry.
+ * @return true if the system was prepared for sleep, otherwise false.
+ */
 bool lowpower_prepare_for_sleep(void)
 {
     if (g_lowpower_state.prepared) {
@@ -719,6 +890,9 @@ bool lowpower_prepare_for_sleep(void)
     return true;
 }
 
+/**
+ * @brief Restore peripherals and saved state after returning from STOP2.
+ */
 void lowpower_restore_from_sleep(void)
 {
     if (!g_lowpower_state.prepared) {
@@ -761,6 +935,9 @@ void lowpower_restore_from_sleep(void)
     g_lowpower_state.prepared = false;
 }
 
+/**
+ * @brief Main low-power service routine for idle timers, STOP2 entry, and wake handling.
+ */
 void lowpower_service(void)
 {
     lowpower_service_idle_timer();

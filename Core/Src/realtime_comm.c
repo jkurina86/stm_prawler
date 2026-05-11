@@ -28,6 +28,12 @@ static uint16_t rt_crc;
  * realtime request before any profile has been built reports No_Data. */
 static uint8_t data_sent = 1;
 
+/**
+ * @brief Fold one byte into the CRC-16/XMODEM accumulator.
+ * @param accum Current widened CRC accumulator.
+ * @param ch Input byte to add.
+ * @return Updated widened CRC accumulator.
+ */
 static uint32_t rt_crc16_xmodem_accum(uint32_t accum, uint8_t ch)
 {
     accum |= (uint32_t)ch;
@@ -42,6 +48,13 @@ static uint32_t rt_crc16_xmodem_accum(uint32_t accum, uint8_t ch)
     return accum;
 }
 
+/**
+ * @brief Update the CRC-16/XMODEM accumulator with a byte span.
+ * @param accum Current widened CRC accumulator.
+ * @param data Data bytes to include in the CRC.
+ * @param len Number of bytes in data.
+ * @return Updated widened CRC accumulator.
+ */
 static uint32_t rt_crc16_xmodem_update(uint32_t accum, const uint8_t *data, uint16_t len)
 {
     for (uint16_t i = 0; i < len; i++) {
@@ -51,6 +64,11 @@ static uint32_t rt_crc16_xmodem_update(uint32_t accum, const uint8_t *data, uint
     return accum;
 }
 
+/**
+ * @brief Apply the CRC-16/XMODEM final zero-byte augmentations.
+ * @param accum Current widened CRC accumulator.
+ * @return Final 16-bit CRC value.
+ */
 static uint16_t rt_crc16_xmodem_finish(uint32_t accum)
 {
     /* CRC-16/XMODEM-compatible finish: init 0x0000, poly 0x1021,
@@ -63,6 +81,10 @@ static uint16_t rt_crc16_xmodem_finish(uint32_t accum)
 
 /* Public functions ----------------------------------------------------------*/
 
+/**
+ * @brief Build the realtime CSV payload and cache its frame metadata.
+ * @param profile Normalized profile data to serialize for realtime transfer.
+ */
 void realtime_comm_build(const profile_data_t *profile)
 {
     char *csv_buf = rt_buf;
@@ -183,6 +205,9 @@ void realtime_comm_build(const profile_data_t *profile)
     shell_printf("[realtime] Built %u rows (%u-byte CSV)\r\n", rows_built, rt_len);
 }
 
+/**
+ * @brief Stream the cached realtime payload to the WiFi TCP client.
+ */
 void realtime_comm_stream(void)
 {
     /* Guard to ensure WiFi is in passthrough mode */
@@ -222,6 +247,10 @@ void realtime_comm_stream(void)
     shell_print(SHELL_PROMPT);
 }
 
+/**
+ * @brief Report whether a built realtime payload is waiting to be sent.
+ * @return true if unsent realtime data is pending, otherwise false.
+ */
 bool realtime_comm_data_pending(void)
 {
     return data_sent == 0;

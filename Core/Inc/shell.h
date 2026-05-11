@@ -88,6 +88,7 @@ void cmd_sensors(int argc, char **argv);
 
 /* Config */
 void cmd_config(int argc, char **argv);
+void cmd_samplerate(int argc, char **argv);
 
 /* WiFi */
 void cmd_wifi_status(int argc, char **argv);
