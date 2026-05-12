@@ -754,15 +754,6 @@ void lowpower_wifi_start(void)
 }
 
 /**
- * @brief Power up UART4 and restore WiFi from saved module settings.
- */
-static void lowpower_wifi_resume(void)
-{
-    lowpower_wifi_uart_up();
-    wifi_resume(&huart4);
-}
-
-/**
  * @brief Stop the WiFi module/service and power down UART4.
  */
 void lowpower_wifi_stop(void)
@@ -776,7 +767,7 @@ void lowpower_wifi_stop(void)
 void lowpower_start_wifi_duty_cycle(void)
 {
     g_app.mode = SYS_MODE_IDLE;
-    lowpower_wifi_resume();
+    lowpower_wifi_start();
     lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
 }
 
