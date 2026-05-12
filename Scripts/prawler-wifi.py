@@ -151,6 +151,9 @@ def station_config_matches(resp):
         return (
             fields[2] == str(AP_SECURITY)
             and fields[3] == "0"
+            and fields[5] == CLIENT_IP
+            and fields[6] == CLIENT_MASK
+            and fields[7] == AP_IP
             and fields[11] == str(AUTO_CONNECT_MODE)
         )
 
