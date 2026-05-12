@@ -282,7 +282,7 @@ static bool wifi_setup_ap(void)
     char resp[RESP_BUF_SIZE];
 
     shell_printf("[wifi] Configuring Access Point...\r\n");
-    (void)wifi_send_cmd("AE", resp, sizeof(resp), 10000);
+    //(void)wifi_send_cmd("AE", resp, sizeof(resp), 10000);
 
     if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 2000))
         return false;
