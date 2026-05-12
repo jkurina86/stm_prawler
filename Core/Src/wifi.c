@@ -194,6 +194,47 @@ static bool wifi_expect_ok(const char *cmd, const char *label,
 
 /* Setup functions -----------------------------------------------------------*/
 
+static void wifi_power_on_and_sync(UART_HandleTypeDef *huart)
+{
+    wifi_huart = huart;
+    rb_init();
+    wifi_cmd_pos = 0;
+    wifi_last_eol = 0;
+    wifi_prompt_deferred = false;
+    state = WIFI_STATE_INIT;
+    g_app.wifi_state = (uint8_t)state;
+
+    /* Arm RX interrupt before powering on so the module banner cannot leave
+       UART4 in an overrun state before the first AT response. */
+    __HAL_UART_CLEAR_OREFLAG(wifi_huart);
+    HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
+
+    HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
+                      GPIO_PIN_RESET);
+    HAL_Delay(2000);
+
+    rb_flush();
+
+    char sync_resp[RESP_BUF_SIZE];
+    wifi_send_cmd("", sync_resp, sizeof(sync_resp), 2000);
+    rb_flush();
+}
+
+static bool wifi_start_ap(void)
+{
+    shell_printf("[wifi] Starting Access Point...\r\n");
+    char resp[RESP_BUF_SIZE];
+    wifi_send_cmd("AD", resp, sizeof(resp), 5000);
+    if (strstr(resp, "ERROR")) {
+        shell_printf("[wifi] Failed to start AP: %s\r\n", resp);
+        return false;
+    }
+
+    shell_printf("[wifi] AP started (SSID: %s, IP: %s)\r\n",
+                 WIFI_AP_SSID, WIFI_AP_IP);
+    return true;
+}
+
 static bool wifi_setup_ap(void)
 {
     shell_printf("[wifi] Configuring Access Point...\r\n");
@@ -209,21 +250,13 @@ static bool wifi_setup_ap(void)
         return false;
     if (!wifi_expect_ok("AL=255", "Set DHCP Lease Time", 2000))
         return false;
-
-    shell_printf("[wifi] Starting Access Point...\r\n");
-    char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("AD", resp, sizeof(resp), 5000);
-    if (strstr(resp, "ERROR")) {
-        shell_printf("[wifi] Failed to start AP: %s\r\n", resp);
+    if (!wifi_expect_ok("Z1", "Save Settings to Flash", 2000))
         return false;
-    }
 
-    shell_printf("[wifi] AP started (SSID: %s, IP: %s)\r\n",
-                 WIFI_AP_SSID, WIFI_AP_IP);
-    return true;
+    return wifi_start_ap();
 }
 
-static bool wifi_setup_tcp_server(void)
+static bool wifi_setup_tcp_server(bool save_settings)
 {
     shell_printf("[wifi] Configuring TCP passthrough on port %s...\r\n",
                  WIFI_TCP_PORT);
@@ -243,6 +276,8 @@ static bool wifi_setup_tcp_server(void)
     if (!wifi_expect_ok("S2=50", "Set Write Timeout", 2000))
         return false;
     if (!wifi_expect_ok("PK=1,30000", "Enable TCP Keep-Alive", 2000))
+        return false;
+    if (save_settings && !wifi_expect_ok("Z1", "Save Settings to Flash", 2000))
         return false;
 
     /* Enter streaming mode -- this is the last AT command.
@@ -267,35 +302,8 @@ static bool wifi_setup_tcp_server(void)
 
 void wifi_init(UART_HandleTypeDef *huart)
 {
-    wifi_huart = huart;
-    rb_init();
-    wifi_cmd_pos = 0;
-    wifi_last_eol = 0;
-    wifi_prompt_deferred = false;
-    state = WIFI_STATE_INIT;
-    g_app.wifi_state = (uint8_t)state;
-
-    /* Arm RX interrupt BEFORE powering on the module. The boot banner
-       would otherwise overrun UART->RDR and leave the peripheral in an
-       ORE error state, silently dropping the first real AT response. */
-    __HAL_UART_CLEAR_OREFLAG(wifi_huart);
-    HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
-
-    /* Power on ISM4343: drive PB9 low and give the module 3 s to boot. */
-    HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
-                      GPIO_PIN_RESET);
-    HAL_Delay(3000);
-
-    /* Discard the buffered boot banner */
-    rb_flush();
-
     shell_printf("[wifi] Initializing ISM4343 module...\r\n");
-
-    /* Sync: send a bare CR and confirm the prompt is responsive before
-       issuing real AT commands. */
-    char sync_resp[RESP_BUF_SIZE];
-    wifi_send_cmd("", sync_resp, sizeof(sync_resp), 2000);
-    rb_flush();
+    wifi_power_on_and_sync(huart);
 
     if (!wifi_setup_ap()) {
         state = WIFI_STATE_ERROR;
@@ -303,7 +311,25 @@ void wifi_init(UART_HandleTypeDef *huart)
         return;
     }
 
-    if (!wifi_setup_tcp_server()) {
+    if (!wifi_setup_tcp_server(true)) {
+        state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
+        return;
+    }
+}
+
+void wifi_resume(UART_HandleTypeDef *huart)
+{
+    shell_printf("[wifi] Resuming ISM4343 module...\r\n");
+    wifi_power_on_and_sync(huart);
+
+    if (!wifi_start_ap()) {
+        state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
+        return;
+    }
+
+    if (!wifi_setup_tcp_server(false)) {
         state = WIFI_STATE_ERROR;
         g_app.wifi_state = (uint8_t)state;
         return;

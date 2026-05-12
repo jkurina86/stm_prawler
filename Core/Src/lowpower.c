@@ -25,7 +25,7 @@
 #define LOWPOWER_IDLE_TIMEOUT_SECONDS 60UL
 #define LOWPOWER_IDLE_TIMEOUT_MS (LOWPOWER_IDLE_TIMEOUT_SECONDS * 1000UL)
 #define LOWPOWER_STOP2_RETURN_TIMEOUT_MS 2000UL
-#define LOWPOWER_RTC_WAKE_SECONDS 10UL
+#define LOWPOWER_RTC_WAKE_SECONDS 20UL
 
 /* External peripheral handles declared in main.c ---------------------------*/
 extern SPI_HandleTypeDef hspi1;
@@ -310,7 +310,7 @@ void lowpower_shell_uart_down(void)
     HAL_UART_Abort(&huart1);
     HAL_UART_DeInit(&huart1);
 
-    lowpower_config_analog(GPIOA, GPIO_PIN_9 | GPIO_PIN_10, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOA, GPIO_PIN_9 | GPIO_PIN_10, GPIO_NOPULL);
     lowpower_config_analog(GPIOA, GPIO_PIN_11 | GPIO_PIN_12, GPIO_NOPULL);
 }
 
@@ -346,7 +346,7 @@ void lowpower_optode_uart_down(void)
     HAL_UART_DeInit(&huart2);
 
     lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOA, GPIO_PIN_2 | GPIO_PIN_3, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOA, GPIO_PIN_2 | GPIO_PIN_3, GPIO_NOPULL);
     g_app.optode_status = PERIPH_OFF;
 }
 
@@ -385,7 +385,7 @@ void lowpower_ctd_uart_down(void)
     HAL_UART_DeInit(&huart3);
 
     lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5, GPIO_NOPULL);
     g_app.ctd_status = PERIPH_OFF;
 }
 
@@ -425,7 +425,7 @@ void lowpower_wifi_uart_down(void)
 
     lowpower_config_output(GPIOB, GPIO_PIN_11, GPIO_PIN_RESET);
     lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
-    lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_NOPULL);
 }
 
 /**
@@ -461,8 +461,8 @@ void lowpower_wetlab_uart_down(void)
     HAL_UART_DeInit(&huart5);
 
     lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOC, GPIO_PIN_12, GPIO_PULLDOWN);
-    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOC, GPIO_PIN_12, GPIO_NOPULL);
+    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_NOPULL);
     g_app.wetlab_status = PERIPH_OFF;
 }
 
@@ -754,6 +754,15 @@ void lowpower_wifi_start(void)
 }
 
 /**
+ * @brief Power up UART4 and restore WiFi from saved module settings.
+ */
+static void lowpower_wifi_resume(void)
+{
+    lowpower_wifi_uart_up();
+    wifi_resume(&huart4);
+}
+
+/**
  * @brief Stop the WiFi module/service and power down UART4.
  */
 void lowpower_wifi_stop(void)
@@ -767,7 +776,7 @@ void lowpower_wifi_stop(void)
 void lowpower_start_wifi_duty_cycle(void)
 {
     g_app.mode = SYS_MODE_IDLE;
-    lowpower_wifi_start();
+    lowpower_wifi_resume();
     lowpower_start_idle_timer(LOWPOWER_STOP2_RETURN_TIMEOUT_MS);
 }
 
