@@ -254,6 +254,13 @@ static bool wifi_start_ap(void)
 {
     shell_printf("[wifi] Starting Access Point...\r\n");
     char resp[RESP_BUF_SIZE];
+
+    /* Make AP startup deterministic after module power cycling.  The module can
+       preserve SoftAP state and reject AD with "Already Running"; AE is safe to
+       ignore when there is no active AP/direct-connect state. */
+    wifi_send_cmd("AE", resp, sizeof(resp), 3000);
+    HAL_Delay(250);
+
     uint16_t len = wifi_send_cmd("AD", resp, sizeof(resp), 10000);
 
     if (strstr(resp, "Already Running") != NULL) {
