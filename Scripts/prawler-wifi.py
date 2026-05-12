@@ -49,7 +49,7 @@ POST_JOIN_DELAY = 0.0
 POST_PASSTHROUGH_FLUSH = 0.0
 INITIAL_PROMPT_POKES = 3
 INITIAL_PROMPT_INTERVAL = 0.1
-AT_MODE_PROBE_TIMEOUT = 0.25
+AT_MODE_PROBE_TIMEOUT = 1.0
 # --------------------------------------------------------------
 
 g_initial_shell_output = ""
@@ -231,29 +231,21 @@ def is_in_at_mode(ser):
     In streaming mode the bytes go to the TCP peer and we get nothing back
     or the prawler shell prompt, which is not treated as local AT mode.
     """
-    saved_timeout = ser.timeout
-    ser.timeout = 0.1
-    ser.reset_input_buffer()
-    ser.write(b"\r")
-    data = b""
-    deadline = time.time() + AT_MODE_PROBE_TIMEOUT
-    while time.time() < deadline:
-        data += ser.read(ser.in_waiting or 1)
-        if b"> " in data or b"OK" in data:
-            break
-    ser.timeout = saved_timeout
-    # AT mode gives back \r\n\r\nOK\r\n> or similar with the prompt
-    text = data.decode("ascii", errors="replace")
-    return "OK" in text or "> " in text
+    resp = send_cmd(ser, "", timeout=AT_MODE_PROBE_TIMEOUT)
+    # AT mode gives back \r\n\r\nOK\r\n> or a bare prompt, depending on state.
+    return ("OK" in resp or "> " in resp), resp
 
 
 def ensure_at_mode(ser):
     """Verify local AT-command access is available."""
+    last_resp = ""
     for _ in range(AT_SYNC_ATTEMPTS):
-        if is_in_at_mode(ser):
+        ok, last_resp = is_in_at_mode(ser)
+        if ok:
             return
-        time.sleep(0.1)
-    raise RuntimeError("No AT prompt at 9600 baud; power-cycle COM10 module or check baud")
+        time.sleep(0.25)
+    detail = last_resp.strip().replace("\r", "\\r").replace("\n", "\\n")
+    raise RuntimeError(f"No AT prompt at {BAUD} baud; last response: {detail!r}")
 
 
 def setup_station(ser):
