@@ -31,6 +31,8 @@ extern IWDG_HandleTypeDef hiwdg;
 #define WIFI_CMD_BUF_SIZE  SHELL_MAX_CMD_LEN
 #define WIFI_SHELL_PROMPT "$ "
 #define WIFI_BOOT_SYNC_TIMEOUT_MS 8000U
+#define WIFI_RESET_SYNC_TIMEOUT_MS 10000U
+#define WIFI_RESET_SETTLE_MS 1000U
 
 /* Private types -------------------------------------------------------------*/
 typedef struct {
@@ -257,7 +259,12 @@ static bool wifi_power_on_and_sync(UART_HandleTypeDef *huart)
         return false;
     }
 
-    return true;
+    shell_print("[wifi] Resetting module...\r\n");
+    rb_flush();
+    wifi_send_str("ZR\r");
+    HAL_Delay(WIFI_RESET_SETTLE_MS);
+
+    return wifi_sync_prompt(WIFI_RESET_SYNC_TIMEOUT_MS);
 }
 
 static bool wifi_start_ap(void)
@@ -279,10 +286,7 @@ static bool wifi_start_ap(void)
 
 static bool wifi_setup_ap(void)
 {
-    char resp[RESP_BUF_SIZE];
-
     shell_printf("[wifi] Configuring Access Point...\r\n");
-    //(void)wifi_send_cmd("AE", resp, sizeof(resp), 10000);
 
     if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 2000))
         return false;
