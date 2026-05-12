@@ -171,6 +171,21 @@ static uint16_t wifi_send_cmd(const char *cmd, char *resp_buf, uint16_t buf_size
     return wifi_read_until_prompt(resp_buf, buf_size, timeout_ms);
 }
 
+static bool wifi_resp_has_prompt(const char *resp, uint16_t len)
+{
+    return (len >= 2U && resp[len - 2U] == '>' && resp[len - 1U] == ' ');
+}
+
+static bool wifi_resp_has_ok(const char *resp)
+{
+    return (strstr(resp, "OK") != NULL);
+}
+
+static bool wifi_resp_has_error(const char *resp)
+{
+    return (strstr(resp, "ERROR") != NULL);
+}
+
 /**
  * @brief  Send command and verify the response contains "OK" followed by a
  *         "> " prompt terminator. Logs failures via shell_printf.
@@ -181,9 +196,9 @@ static bool wifi_expect_ok(const char *cmd, const char *label,
     char resp[RESP_BUF_SIZE];
     uint16_t len = wifi_send_cmd(cmd, resp, sizeof(resp), timeout_ms);
 
-    bool has_prompt = (len >= 2 && resp[len - 2] == '>' && resp[len - 1] == ' ');
-    bool has_ok     = (strstr(resp, "OK") != NULL);
-    bool has_error  = (strstr(resp, "ERROR") != NULL);
+    bool has_prompt = wifi_resp_has_prompt(resp, len);
+    bool has_ok     = wifi_resp_has_ok(resp);
+    bool has_error  = wifi_resp_has_error(resp);
 
     if (!has_prompt || !has_ok || has_error) {
         shell_printf("[wifi] %s failed: %s\r\n", label, resp);
@@ -194,7 +209,7 @@ static bool wifi_expect_ok(const char *cmd, const char *label,
 
 /* Setup functions -----------------------------------------------------------*/
 
-static void wifi_power_on_and_sync(UART_HandleTypeDef *huart)
+static bool wifi_power_on_and_sync(UART_HandleTypeDef *huart)
 {
     wifi_huart = huart;
     rb_init();
@@ -216,16 +231,24 @@ static void wifi_power_on_and_sync(UART_HandleTypeDef *huart)
     rb_flush();
 
     char sync_resp[RESP_BUF_SIZE];
-    wifi_send_cmd("", sync_resp, sizeof(sync_resp), 2000);
+    uint16_t len = wifi_send_cmd("", sync_resp, sizeof(sync_resp), 3000);
     rb_flush();
+
+    if (!wifi_resp_has_prompt(sync_resp, len) || wifi_resp_has_error(sync_resp)) {
+        shell_printf("[wifi] AT prompt sync failed: %s\r\n", sync_resp);
+        return false;
+    }
+
+    return true;
 }
 
 static bool wifi_start_ap(void)
 {
     shell_printf("[wifi] Starting Access Point...\r\n");
     char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("AD", resp, sizeof(resp), 5000);
-    if (strstr(resp, "ERROR")) {
+    uint16_t len = wifi_send_cmd("AD", resp, sizeof(resp), 5000);
+    if (!wifi_resp_has_prompt(resp, len) || !wifi_resp_has_ok(resp) ||
+        wifi_resp_has_error(resp)) {
         shell_printf("[wifi] Failed to start AP: %s\r\n", resp);
         return false;
     }
@@ -280,11 +303,11 @@ static bool wifi_setup_tcp_server(bool save_settings)
     if (save_settings && !wifi_expect_ok("Z1", "Save Settings to Flash", 2000))
         return false;
 
-    /* Enter streaming mode -- this is the last AT command.
-       After the module responds, all UART data flows to/from TCP peer. */
+    /* Enter streaming mode -- this is the last AT command.  PX may switch
+       modes silently, so only an explicit ERROR means the transition failed. */
     char resp[RESP_BUF_SIZE];
-    wifi_send_cmd("PX=0,0", resp, sizeof(resp), 1000);
-    if (strstr(resp, "ERROR")) {
+    wifi_send_cmd("PX=0,0", resp, sizeof(resp), 200);
+    if (wifi_resp_has_error(resp)) {
         shell_printf("[wifi] PX failed: %s\r\n", resp);
         return false;
     }
@@ -303,7 +326,11 @@ static bool wifi_setup_tcp_server(bool save_settings)
 void wifi_init(UART_HandleTypeDef *huart)
 {
     shell_printf("[wifi] Initializing ISM4343 module...\r\n");
-    wifi_power_on_and_sync(huart);
+    if (!wifi_power_on_and_sync(huart)) {
+        state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
+        return;
+    }
 
     if (!wifi_setup_ap()) {
         state = WIFI_STATE_ERROR;
@@ -321,7 +348,11 @@ void wifi_init(UART_HandleTypeDef *huart)
 void wifi_resume(UART_HandleTypeDef *huart)
 {
     shell_printf("[wifi] Resuming ISM4343 module...\r\n");
-    wifi_power_on_and_sync(huart);
+    if (!wifi_power_on_and_sync(huart)) {
+        state = WIFI_STATE_ERROR;
+        g_app.wifi_state = (uint8_t)state;
+        return;
+    }
 
     if (!wifi_start_ap()) {
         state = WIFI_STATE_ERROR;

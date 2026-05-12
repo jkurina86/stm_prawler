@@ -23,7 +23,7 @@ PORT = "COM10"
 BAUD = 9600
 TIMEOUT = 0.05
 
-AP_SSID = "prawler2"
+AP_SSID = "prawler"
 AP_SECURITY = 0  # 0 = Open
 AP_IP = "192.168.10.1"
 TCP_PORT = 5000
@@ -33,26 +33,23 @@ CLIENT_MASK = "255.255.255.0"
 # Resilience settings
 KEEPALIVE_MS = 30000  # TCP keep-alive idle timeout (ms)
 RECONNECT_DELAY = 0.25  # Small throttle after failed reconnect attempts
-JOIN_RETRY_DELAY = 1.0  # Let the module settle before another AP join
 MAX_RECONNECT_ATTEMPTS = 0  # 0 = unlimited
+AUTO_CONNECT_MODE = 3  # Auto-join and auto-reconnect
+CONNECT_POLL_INTERVAL = 0.5
+CONNECT_STATUS_CMD_TIMEOUT = 1.0
 AT_PROMPT_QUIET_MS = 50  # Extra quiet time after AT prompt at 9600 baud
 CMD_PREDRAIN_QUIET_MS = 25
 CMD_PREDRAIN_TIMEOUT = 0.2
+AT_SYNC_ATTEMPTS = 5
 RETRY_SETTLE_QUIET_MS = 150
 RETRY_SETTLE_TIMEOUT = 0.5
 TCP_CMD_TIMEOUT = 0.35
 PASSTHROUGH_CMD_TIMEOUT = 0.2
-JOIN_CMD_TIMEOUT = 12.0
-JOIN_DRAIN_QUIET_MS = 350
-JOIN_DRAIN_TIMEOUT = 2.0
-JOIN_STATUS_DELAY = 0.75
-JOIN_STATUS_TIMEOUT = 4.0
-JOIN_STATUS_CMD_TIMEOUT = 1.5
 POST_JOIN_DELAY = 0.0
 POST_PASSTHROUGH_FLUSH = 0.0
-SHELL_PROMPT_READ_WINDOW = 0.1
+INITIAL_PROMPT_POKES = 3
+INITIAL_PROMPT_INTERVAL = 0.1
 AT_MODE_PROBE_TIMEOUT = 0.25
-RESET_BOOT_TIMEOUT = 3.0
 # --------------------------------------------------------------
 
 g_initial_shell_output = ""
@@ -95,9 +92,7 @@ def _read_until_prompt(ser, timeout, quiet_ms=AT_PROMPT_QUIET_MS):
 
 def send_cmd(ser, cmd, timeout=2.0):
     """Send an AT command and wait for the response."""
-    _read_until_quiet(
-        ser, quiet_ms=CMD_PREDRAIN_QUIET_MS, timeout=CMD_PREDRAIN_TIMEOUT
-    )
+    _read_until_quiet(ser, quiet_ms=CMD_PREDRAIN_QUIET_MS, timeout=CMD_PREDRAIN_TIMEOUT)
     ser.reset_input_buffer()
     ser.write((cmd + "\r").encode())
     return _read_until_prompt(ser, timeout)
@@ -126,73 +121,81 @@ def expect_ok_retry(ser, cmd, label="", timeout=2.0):
     return resp
 
 
-def compact_response(resp, limit=180):
-    """Format AT output for concise retry status lines."""
-    text = " ".join(resp.split())
-    if not text:
-        return "<no response>"
-    if len(text) > limit:
-        return text[: limit - 3] + "..."
-    return text
+def response_has_auto_connect(resp):
+    """Return True when C? reports the desired auto-connect mode."""
+    compact = " ".join(resp.split())
+    if f"Auto Connect: {AUTO_CONNECT_MODE}" in compact:
+        return True
+
+    for line in resp.splitlines():
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) >= 12 and fields[11] == str(AUTO_CONNECT_MODE):
+            return True
+
+    return False
 
 
-def response_has_expected_ip(resp):
-    """Return True when a module response shows the configured client IP."""
-    return CLIENT_IP in resp
+def network_settings_fields(resp):
+    """Return machine-readable C? fields when present."""
+    for line in resp.splitlines():
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) >= 15 and fields[0] == AP_SSID:
+            return fields
+    return None
 
 
-def wait_for_join_status(ser, first_resp):
-    """Wait briefly for a join attempt to finish before retrying C0."""
-    combined = first_resp
-    deadline = time.time() + JOIN_STATUS_TIMEOUT
-
-    while time.time() < deadline:
-        if response_has_expected_ip(combined):
-            return True, combined
-        if "ERROR" in combined and "[JOIN" in combined:
-            return False, combined
-
-        remaining = deadline - time.time()
-        if remaining <= 0:
-            break
-
-        time.sleep(min(JOIN_STATUS_DELAY, remaining))
-        drained = _read_until_quiet(ser, quiet_ms=200, timeout=0.5)
-        if drained:
-            combined += drained
-            if response_has_expected_ip(combined):
-                return True, combined
-            if "ERROR" in combined and "[JOIN" in combined:
-                return False, combined
-
-        resp = send_cmd(
-            ser,
-            "C?",
-            timeout=min(JOIN_STATUS_CMD_TIMEOUT, max(0.2, deadline - time.time())),
+def station_config_matches(resp):
+    """Return True when C? contains the saved station settings we need."""
+    fields = network_settings_fields(resp)
+    if fields is not None:
+        return (
+            fields[2] == str(AP_SECURITY)
+            and fields[3] == "0"
+            and fields[11] == str(AUTO_CONNECT_MODE)
         )
-        resp += _read_until_quiet(ser, quiet_ms=200, timeout=0.5)
-        if resp:
-            combined += resp
 
-    return response_has_expected_ip(combined), combined
+    return (
+        AP_SSID in resp
+        and response_has_auto_connect(resp)
+    )
+
+
+def connection_status_connected(resp):
+    """Return True when CS reports connected."""
+    if "Status: Connected" in resp:
+        return True
+
+    for line in resp.splitlines():
+        if line.strip() == "1":
+            return True
+
+    return False
+
+
+def wait_for_auto_connection(ser):
+    """Poll CS until module auto-join/reconnect reports connected."""
+    print("[local] Waiting for WiFi auto-connect...")
+    while True:
+        resp = send_cmd(ser, "CS", timeout=CONNECT_STATUS_CMD_TIMEOUT)
+        if connection_status_connected(resp):
+            print("[local] Joined AP.")
+            return
+        time.sleep(CONNECT_POLL_INTERVAL)
 
 
 def solicit_shell_prompt(ser):
-    """Send CRLF until the prawler shell prompt appears."""
+    """Send three CRLF prompt pokes after entering passthrough."""
     data = b""
-    while True:
+
+    for _ in range(INITIAL_PROMPT_POKES):
         ser.write(b"\r\n")
         ser.flush()
+        time.sleep(INITIAL_PROMPT_INTERVAL)
+        if ser.in_waiting:
+            data += ser.read(ser.in_waiting)
 
-        deadline = time.time() + SHELL_PROMPT_READ_WINDOW
-        while time.time() < deadline:
-            chunk = ser.read(ser.in_waiting or 1)
-            if chunk:
-                data += chunk
-                if b"$ " in data:
-                    return data.decode("ascii", errors="replace")
-            else:
-                time.sleep(0.01)
+    tail = _read_until_quiet(ser, quiet_ms=50, timeout=0.2)
+    return data.decode("ascii", errors="replace") + tail
 
 
 def check_passthrough(ser):
@@ -212,7 +215,7 @@ def check_passthrough(ser):
         if b"$ " in data or b"> " in data:
             break
     ser.timeout = saved_timeout
-    if b"$ " in data or b"> " in data:
+    if b"$ " in data:
         print("[local] Module already in passthrough mode -- skipping setup.")
         return True
     return False
@@ -242,82 +245,41 @@ def is_in_at_mode(ser):
 
 
 def ensure_at_mode(ser):
-    """Return the local module to AT command mode if it is not already there."""
-    if not is_in_at_mode(ser):
-        hard_reset(ser)
-
-
-def wait_for_at_prompt(ser, timeout=RESET_BOOT_TIMEOUT):
-    """Poll until the module accepts AT commands after reset."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        ser.reset_input_buffer()
-        ser.write(b"\r")
-        resp = _read_until_prompt(ser, timeout=0.4)
-        if "OK" in resp or "> " in resp:
-            return True
-        time.sleep(0.05)
-    return False
-
-
-def hard_reset(ser):
-    """Software-reset the local ISM4343 module and wait for boot."""
-    print("[local] Resetting module...")
-    send_cmd(ser, "ZR", timeout=2)
-    ser.reset_input_buffer()
-    if not wait_for_at_prompt(ser):
-        raise RuntimeError("Module did not return to AT prompt after reset")
+    """Verify local AT-command access is available."""
+    for _ in range(AT_SYNC_ATTEMPTS):
+        if is_in_at_mode(ser):
+            return
+        time.sleep(0.1)
+    raise RuntimeError("No AT prompt at 9600 baud; power-cycle COM10 module or check baud")
 
 
 def setup_station(ser):
-    """Configure local module as station and join the prawler AP."""
+    """Configure local module as station and wait for auto-connect."""
     ensure_at_mode(ser)
-    send_cmd(ser, "CD", timeout=3)
 
-    print(f"[local] Joining AP '{AP_SSID}'...")
-    expect_ok(ser, f"C1={AP_SSID}", "Set Network SSID")
-    expect_ok(ser, f"C3={AP_SECURITY}", "Set Security Type")
-    expect_ok(ser, "C4=0", "Disable DHCP")
-    expect_ok(ser, f"C6={CLIENT_IP}", "Set Static IP")
-    expect_ok(ser, f"C7={CLIENT_MASK}", "Set Netmask")
-    expect_ok(ser, f"C8={AP_IP}", "Set Gateway")
+    settings = send_cmd(ser, "C?", timeout=2)
+    if not station_config_matches(settings):
+        print(f"[local] Saving auto-connect config for AP '{AP_SSID}'...")
+        send_cmd(ser, "CD", timeout=3)
+        expect_ok(ser, f"C1={AP_SSID}", "Set Network SSID")
+        expect_ok(ser, f"C3={AP_SECURITY}", "Set Security Type")
+        expect_ok(ser, "C4=0", "Disable DHCP")
+        expect_ok(ser, f"C6={CLIENT_IP}", "Set Static IP")
+        expect_ok(ser, f"C7={CLIENT_MASK}", "Set Netmask")
+        expect_ok(ser, f"C8={AP_IP}", "Set Gateway")
+        expect_ok(ser, f"CC={AUTO_CONNECT_MODE}", "Enable Auto-Connect")
 
-    # The script manages connection state explicitly. Saved auto-join can race
-    # the setup sequence after module reset and leave C0 reporting 0.0.0.0.
-    expect_ok(ser, "CC=0", "Disable Auto-Join")
+        # Disable power save to keep the radio active during idle periods.
+        expect_ok(ser, "ZP=1,0", "Disable Power Save")
 
-    # Disable power save to keep the radio active during idle periods.
-    expect_ok(ser, "ZP=1,0", "Disable Power Save")
+        # CC requires Z1 to persist across reset/power-up.
+        expect_ok(ser, "Z1", "Save Settings to Flash")
+        raise RuntimeError("Saved auto-connect config; power-cycle COM10 module and rerun")
+    else:
+        # Keep the current boot's radio policy aligned without another flash save.
+        expect_ok(ser, "ZP=1,0", "Disable Power Save")
 
-    attempt = 0
-    while True:
-        attempt += 1
-        resp = send_cmd(ser, "C0", timeout=JOIN_CMD_TIMEOUT)
-        resp += _read_until_quiet(
-            ser, quiet_ms=JOIN_DRAIN_QUIET_MS, timeout=JOIN_DRAIN_TIMEOUT
-        )
-
-        if response_has_expected_ip(resp):
-            print("[local] Joined AP.")
-            break
-
-        joined, status = wait_for_join_status(ser, resp)
-        if joined:
-            print("[local] Joined AP.")
-            break
-
-        if "ERROR" in status and "Already connected" not in status:
-            print(
-                f"[local] Join attempt {attempt} failed: "
-                f"{compact_response(status)}"
-            )
-        else:
-            print(
-                f"[local] Join attempt {attempt} missing expected IP "
-                f"{CLIENT_IP}: {compact_response(status)}"
-            )
-
-        time.sleep(JOIN_RETRY_DELAY)
+    wait_for_auto_connection(ser)
 
     resp = send_cmd(ser, "C?", timeout=TCP_CMD_TIMEOUT)
     resp += _read_until_quiet(ser, quiet_ms=100, timeout=0.2)
@@ -365,12 +327,16 @@ def setup_tcp_client(ser):
 
 
 def connect(ser):
-    """Run the full connection sequence: station join + TCP client setup.
+    """Run the full connection sequence: WiFi auto-connect + TCP client setup.
 
     Returns True on success, False on failure.
     """
+    global g_initial_shell_output
+
     try:
-        if not check_passthrough(ser):
+        if check_passthrough(ser):
+            g_initial_shell_output = solicit_shell_prompt(ser)
+        else:
             setup_station(ser)
             time.sleep(POST_JOIN_DELAY)
             setup_tcp_client(ser)
@@ -383,7 +349,7 @@ def connect(ser):
 def reconnect(ser):
     """Attempt to re-establish the connection after a drop.
 
-    Resets the module and runs the full setup sequence again.
+    Waits for local AT access, then lets saved auto-connect recover WiFi.
     Returns True on success, False if all attempts are exhausted.
     """
     attempt = 0
@@ -392,13 +358,6 @@ def reconnect(ser):
         print(f"\n[local] Reconnect attempt {attempt}...")
 
         try:
-            # Make sure we're back in AT command mode.  If the module
-            # already dropped out of streaming on its own (keep-alive
-            # failure or TCP close), we should be there.  If not, a
-            # hard reset will get us there.
-            if not is_in_at_mode(ser):
-                hard_reset(ser)
-
             setup_station(ser)
             time.sleep(POST_JOIN_DELAY)
             setup_tcp_client(ser)
