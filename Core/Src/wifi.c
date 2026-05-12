@@ -145,10 +145,10 @@ static uint16_t wifi_read_until_prompt(char *resp_buf, uint16_t buf_size,
         if (rb_pop(&byte)) {
             if (idx < buf_size - 1)
                 resp_buf[idx++] = (char)byte;
-            /* Check for "> " prompt (last two chars) */
-            if (idx >= 2 &&
-                resp_buf[idx - 2] == '>' &&
-                resp_buf[idx - 1] == ' ') {
+            /* The module normally prompts with "> ", but some firmware paths
+               return a bare ">" after status/error text. */
+            if ((idx >= 2 && resp_buf[idx - 2] == '>' && resp_buf[idx - 1] == ' ') ||
+                resp_buf[idx - 1] == '>') {
                 break;
             }
         }
@@ -174,7 +174,8 @@ static uint16_t wifi_send_cmd(const char *cmd, char *resp_buf, uint16_t buf_size
 
 static bool wifi_resp_has_prompt(const char *resp, uint16_t len)
 {
-    return (len >= 2U && resp[len - 2U] == '>' && resp[len - 1U] == ' ');
+    return ((len >= 2U && resp[len - 2U] == '>' && resp[len - 1U] == ' ') ||
+            (len >= 1U && resp[len - 1U] == '>'));
 }
 
 static bool wifi_resp_has_ok(const char *resp)
@@ -255,8 +256,7 @@ static bool wifi_start_ap(void)
     char resp[RESP_BUF_SIZE];
     uint16_t len = wifi_send_cmd("AD", resp, sizeof(resp), 10000);
 
-    if (wifi_resp_has_prompt(resp, len) &&
-        strstr(resp, "Already Running") != NULL) {
+    if (strstr(resp, "Already Running") != NULL) {
         shell_printf("[wifi] AP already running (SSID: %s, IP: %s)\r\n",
                      WIFI_AP_SSID, WIFI_AP_IP);
         return true;
