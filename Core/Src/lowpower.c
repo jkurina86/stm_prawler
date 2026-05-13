@@ -310,7 +310,7 @@ void lowpower_shell_uart_down(void)
     HAL_UART_Abort(&huart1);
     HAL_UART_DeInit(&huart1);
 
-    lowpower_config_analog(GPIOA, GPIO_PIN_9 | GPIO_PIN_10, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOA, GPIO_PIN_9 | GPIO_PIN_10, GPIO_NOPULL);
     lowpower_config_analog(GPIOA, GPIO_PIN_11 | GPIO_PIN_12, GPIO_NOPULL);
 }
 
@@ -346,7 +346,7 @@ void lowpower_optode_uart_down(void)
     HAL_UART_DeInit(&huart2);
 
     lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOA, GPIO_PIN_2 | GPIO_PIN_3, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOA, GPIO_PIN_2 | GPIO_PIN_3, GPIO_NOPULL);
     g_app.optode_status = PERIPH_OFF;
 }
 
@@ -385,7 +385,7 @@ void lowpower_ctd_uart_down(void)
     HAL_UART_DeInit(&huart3);
 
     lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5, GPIO_NOPULL);
     g_app.ctd_status = PERIPH_OFF;
 }
 
@@ -425,7 +425,7 @@ void lowpower_wifi_uart_down(void)
 
     lowpower_config_output(GPIOB, GPIO_PIN_11, GPIO_PIN_RESET);
     lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
-    lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_NOPULL);
 }
 
 /**
@@ -461,8 +461,8 @@ void lowpower_wetlab_uart_down(void)
     HAL_UART_DeInit(&huart5);
 
     lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOC, GPIO_PIN_12, GPIO_PULLDOWN);
-    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOC, GPIO_PIN_12, GPIO_NOPULL);
+    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_NOPULL);
     g_app.wetlab_status = PERIPH_OFF;
 }
 
