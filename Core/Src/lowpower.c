@@ -27,6 +27,11 @@
 #define LOWPOWER_STOP2_RETURN_TIMEOUT_MS 5000UL
 #define LOWPOWER_RTC_WAKE_SECONDS 20UL
 
+#define UART4_MAX3226_EN_GPIO_Port GPIOB
+#define UART4_MAX3226_EN_Pin GPIO_PIN_11
+#define MAX3226_ENABLE_OFF GPIO_PIN_RESET
+#define MAX3226_ENABLE_ON GPIO_PIN_SET
+
 /* External peripheral handles declared in main.c ---------------------------*/
 extern SPI_HandleTypeDef hspi1;
 extern SPI_HandleTypeDef hspi2;
@@ -88,6 +93,31 @@ static void lowpower_config_analog(GPIO_TypeDef *port, uint16_t pins, uint32_t p
     gpio.Mode = GPIO_MODE_ANALOG;
     gpio.Pull = pull;
     HAL_GPIO_Init(port, &gpio);
+}
+
+/**
+ * @brief Force all MAX3226 UART transceivers off and park their MCU pins.
+ */
+static void lowpower_max3226_transceivers_down(void)
+{
+    /* MAX3226 pin 9 enables are active-high in this board design. */
+    lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin,
+                           MAX3226_ENABLE_OFF);
+    lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin,
+                           MAX3226_ENABLE_OFF);
+    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin,
+                           MAX3226_ENABLE_OFF);
+
+    /* UART5 is enabled through the auxiliary decoder; 00 leaves it disabled. */
+    lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin,
+                           GPIO_PIN_RESET);
+
+    lowpower_config_analog(GPIOA,
+                           GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3,
+                           GPIO_NOPULL);
+    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_12,
+                           GPIO_NOPULL);
+    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_NOPULL);
 }
 
 /**
@@ -435,7 +465,8 @@ void lowpower_wifi_uart_down(void)
     HAL_UART_Abort(&huart4);
     HAL_UART_DeInit(&huart4);
 
-    lowpower_config_output(GPIOB, GPIO_PIN_11, GPIO_PIN_RESET);
+    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin,
+                           MAX3226_ENABLE_OFF);
     lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
     lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_NOPULL);
 }
@@ -460,7 +491,8 @@ void lowpower_wifi_uart_up(void)
         Error_Handler();
     }
 
-    lowpower_config_output(GPIOB, GPIO_PIN_11, GPIO_PIN_SET);
+    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin,
+                           MAX3226_ENABLE_ON);
     lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
 }
 
@@ -895,6 +927,7 @@ bool lowpower_prepare_for_sleep(void)
     lowpower_optode_uart_down();
     lowpower_ctd_uart_down();
     lowpower_wifi_uart_down();
+    lowpower_max3226_transceivers_down();
     lowpower_shell_uart_down();
 
     g_lowpower_state.profile_peripherals_up = false;
