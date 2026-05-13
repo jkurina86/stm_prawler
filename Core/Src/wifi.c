@@ -215,6 +215,11 @@ static bool wifi_start_ap(void)
     shell_printf("[wifi] Starting Access Point...\r\n");
     char resp[RESP_BUF_SIZE];
     wifi_send_cmd("AD", resp, sizeof(resp), 5000);
+    if (strstr(resp, "Already Running") != NULL) {
+        shell_printf("[wifi] AP already running (SSID: %s, IP: %s)\r\n",
+                     WIFI_AP_SSID, WIFI_AP_IP);
+        return true;
+    }
     if (wifi_resp_has_error(resp)) {
         shell_printf("[wifi] Failed to start AP: %s\r\n", resp);
         return false;
