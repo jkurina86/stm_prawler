@@ -599,8 +599,7 @@ void lowpower_rtc_spi_down(void)
     HAL_SPI_DeInit(&hspi2);
 
     lowpower_restore_rtc_ce_pin();
-    lowpower_config_output(GPIOB, GPIO_PIN_13 | GPIO_PIN_15, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOB, GPIO_PIN_14, GPIO_NOPULL);
+    lowpower_config_analog(GPIOB, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_NOPULL);
 }
 
 /**
