@@ -150,6 +150,8 @@ extern "C" {
 #define RTC_EEPROM_CTRL_R5K         (1 << 5)  /* 5k resistor */
 #define RTC_EEPROM_CTRL_R20K        (1 << 6)  /* 20k resistor */
 #define RTC_EEPROM_CTRL_R80K        (1 << 7)  /* 80k resistor */
+#define RTC_EEPROM_CTRL_TRICKLE_MASK (RTC_EEPROM_CTRL_R1K | RTC_EEPROM_CTRL_R5K | \
+                                      RTC_EEPROM_CTRL_R20K | RTC_EEPROM_CTRL_R80K)
 
 /* Data structures -----------------------------------------------------------*/
 

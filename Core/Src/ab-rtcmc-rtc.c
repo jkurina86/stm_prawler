@@ -140,8 +140,9 @@ RTC_Status_t RTC_Init(void) {
     uint8_t eeprom_ctrl;
     RTC_Status_t status = RTC_ReadEEPROM(RTC_REG_EEPROM_CONTROL, &eeprom_ctrl);
     if (status == RTC_OK) {
-        /* Clear existing FD0 and FD1 bits */
-        eeprom_ctrl &= ~(RTC_EEPROM_CTRL_FD0 | RTC_EEPROM_CTRL_FD1);
+        /* Disable trickle charging; VBACKUP is not intentionally charged. */
+        eeprom_ctrl &= (uint8_t)~RTC_EEPROM_CTRL_TRICKLE_MASK;
+        eeprom_ctrl &= (uint8_t)~(RTC_EEPROM_CTRL_FD0 | RTC_EEPROM_CTRL_FD1);
         /* Set FD1=1, FD0=1 for 1Hz */
         eeprom_ctrl |= RTC_EEPROM_CTRL_FD0;
         eeprom_ctrl |= RTC_EEPROM_CTRL_FD1;
