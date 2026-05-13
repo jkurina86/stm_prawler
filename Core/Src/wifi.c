@@ -273,6 +273,12 @@ static bool wifi_start_ap(void)
     char resp[RESP_BUF_SIZE];
     uint16_t len = wifi_send_cmd("AD", resp, sizeof(resp), 10000);
 
+    if (wifi_resp_has_prompt(resp, len) && strstr(resp, "Already Running") != NULL) {
+        shell_printf("[wifi] AP already running (SSID: %s, IP: %s)\r\n",
+                     WIFI_AP_SSID, WIFI_AP_IP);
+        return true;
+    }
+
     if (!wifi_resp_has_prompt(resp, len) || !wifi_resp_has_ok(resp) ||
         wifi_resp_has_error(resp)) {
         shell_printf("[wifi] Failed to start AP: %s\r\n", resp);
@@ -284,9 +290,26 @@ static bool wifi_start_ap(void)
     return true;
 }
 
+static bool wifi_reset_tcp_transport(void)
+{
+    shell_printf("[wifi] Resetting TCP state...\r\n");
+
+    if (!wifi_expect_ok("P0=0", "Select socket 0", 2000))
+        return false;
+    if (!wifi_expect_ok("P6=0", "Stop TCP client", 2000))
+        return false;
+    if (!wifi_expect_ok("P5=0", "Stop TCP server", 2000))
+        return false;
+
+    return true;
+}
+
 static bool wifi_setup_ap(void)
 {
     shell_printf("[wifi] Configuring Access Point...\r\n");
+
+    if (!wifi_reset_tcp_transport())
+        return false;
 
     if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 2000))
         return false;
