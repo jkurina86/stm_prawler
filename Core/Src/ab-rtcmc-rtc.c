@@ -159,7 +159,7 @@ RTC_Status_t RTC_Init(void) {
             return status;
         }
 
-        /* Keep pin 3 in CLKOUT mode so the alternate INT output is disabled. */
+        /* Disable CLKOUT so pin 3 does not pull down the board pull-up. */
         status = RTC_EnableClockOutput(false);
         if (status != RTC_OK) {
             return status;
@@ -630,13 +630,17 @@ RTC_Status_t RTC_EnableClockOutput(bool enable) {
         HAL_GPIO_WritePin(RTC_CLKOE_PORT, RTC_CLKOE_PIN, GPIO_PIN_RESET);
     }
     
-    /* Select CLKOUT function on pin 3. CLKOE only controls whether it is driven. */
+    /* CLKOE-low makes CLKOUT drive low, so disable selects high-Z INT mode. */
     uint8_t ctrl1;
     if (RTC_ReadRegister(RTC_REG_CONTROL_1, &ctrl1) != RTC_OK) {
         return RTC_ERROR;
     }
 
-    ctrl1 |= RTC_CTRL1_CLK_INT;
+    if (enable) {
+        ctrl1 |= RTC_CTRL1_CLK_INT;
+    } else {
+        ctrl1 &= (uint8_t)~RTC_CTRL1_CLK_INT;
+    }
     
     return RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
 }
