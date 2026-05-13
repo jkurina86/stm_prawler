@@ -30,9 +30,6 @@ extern IWDG_HandleTypeDef hiwdg;
 #define RESP_BUF_SIZE   512
 #define WIFI_CMD_BUF_SIZE  SHELL_MAX_CMD_LEN
 #define WIFI_SHELL_PROMPT "$ "
-#define WIFI_BOOT_SYNC_TIMEOUT_MS 8000U
-#define WIFI_RESET_SYNC_TIMEOUT_MS 10000U
-#define WIFI_RESET_SETTLE_MS 1000U
 
 /* Private types -------------------------------------------------------------*/
 typedef struct {
@@ -211,76 +208,14 @@ static bool wifi_expect_ok(const char *cmd, const char *label,
     return true;
 }
 
-static bool wifi_sync_prompt(uint32_t timeout_ms)
-{
-    char sync_resp[RESP_BUF_SIZE];
-    uint32_t start = HAL_GetTick();
-    sync_resp[0] = '\0';
-
-    do {
-        uint16_t len;
-
-        rb_flush();
-        len = wifi_send_cmd("", sync_resp, sizeof(sync_resp), 1000);
-        rb_flush();
-
-        if (wifi_resp_has_prompt(sync_resp, len) && !wifi_resp_has_error(sync_resp)) {
-            return true;
-        }
-
-        HAL_Delay(250);
-    } while ((HAL_GetTick() - start) < timeout_ms);
-
-    shell_printf("[wifi] AT prompt sync failed: %s\r\n", sync_resp);
-    return false;
-}
-
 /* Setup functions -----------------------------------------------------------*/
-
-static bool wifi_power_on_and_sync(UART_HandleTypeDef *huart)
-{
-    wifi_huart = huart;
-    rb_init();
-    wifi_cmd_pos = 0;
-    wifi_last_eol = 0;
-    wifi_prompt_deferred = false;
-    state = WIFI_STATE_INIT;
-    g_app.wifi_state = (uint8_t)state;
-
-    /* Arm RX interrupt before powering on so the module banner cannot leave
-       UART4 in an overrun state before the first AT response. */
-    __HAL_UART_CLEAR_OREFLAG(wifi_huart);
-    HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
-
-    HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
-                      GPIO_PIN_RESET);
-
-    if (!wifi_sync_prompt(WIFI_BOOT_SYNC_TIMEOUT_MS)) {
-        return false;
-    }
-
-    shell_print("[wifi] Resetting module...\r\n");
-    rb_flush();
-    wifi_send_str("ZR\r");
-    HAL_Delay(WIFI_RESET_SETTLE_MS);
-
-    return wifi_sync_prompt(WIFI_RESET_SYNC_TIMEOUT_MS);
-}
 
 static bool wifi_start_ap(void)
 {
     shell_printf("[wifi] Starting Access Point...\r\n");
     char resp[RESP_BUF_SIZE];
-    uint16_t len = wifi_send_cmd("AD", resp, sizeof(resp), 10000);
-
-    if (wifi_resp_has_prompt(resp, len) && strstr(resp, "Already Running") != NULL) {
-        shell_printf("[wifi] AP already running (SSID: %s, IP: %s)\r\n",
-                     WIFI_AP_SSID, WIFI_AP_IP);
-        return true;
-    }
-
-    if (!wifi_resp_has_prompt(resp, len) || !wifi_resp_has_ok(resp) ||
-        wifi_resp_has_error(resp)) {
+    wifi_send_cmd("AD", resp, sizeof(resp), 5000);
+    if (wifi_resp_has_error(resp)) {
         shell_printf("[wifi] Failed to start AP: %s\r\n", resp);
         return false;
     }
@@ -290,26 +225,9 @@ static bool wifi_start_ap(void)
     return true;
 }
 
-static bool wifi_reset_tcp_transport(void)
-{
-    shell_printf("[wifi] Resetting TCP state...\r\n");
-
-    if (!wifi_expect_ok("P0=0", "Select socket 0", 2000))
-        return false;
-    if (!wifi_expect_ok("P6=0", "Stop TCP client", 2000))
-        return false;
-    if (!wifi_expect_ok("P5=0", "Stop TCP server", 2000))
-        return false;
-
-    return true;
-}
-
 static bool wifi_setup_ap(void)
 {
     shell_printf("[wifi] Configuring Access Point...\r\n");
-
-    if (!wifi_reset_tcp_transport())
-        return false;
 
     if (!wifi_expect_ok("AS=0," WIFI_AP_SSID, "Set AP SSID", 2000))
         return false;
@@ -330,12 +248,9 @@ static bool wifi_setup_ap(void)
 static bool wifi_enter_server_streaming(void)
 {
     char resp[RESP_BUF_SIZE];
-    uint16_t len = wifi_send_cmd("PX=0,0", resp, sizeof(resp), 1500);
+    wifi_send_cmd("PX=0,0", resp, sizeof(resp), 1000);
 
-    if (strstr(resp, "wiced_tcp_listen failed") != NULL ||
-        strstr(resp, "shutting down") != NULL ||
-        wifi_resp_has_error(resp) ||
-        wifi_resp_has_prompt(resp, len)) {
+    if (wifi_resp_has_error(resp)) {
         shell_printf("[wifi] PX failed: %s\r\n", resp);
         return false;
     }
@@ -349,14 +264,6 @@ static bool wifi_setup_tcp_server(void)
     shell_printf("[wifi] Configuring TCP passthrough on port %s...\r\n",
                  WIFI_TCP_PORT);
 
-    if (!wifi_expect_ok("P0=0", "Select socket 0", 2000))
-        return false;
-    if (!wifi_expect_ok("P6=0", "Stop TCP client", 2000))
-        return false;
-    if (!wifi_expect_ok("P5=0", "Stop TCP server", 2000))
-        return false;
-    if (!wifi_expect_ok("P1=0", "Set TCP protocol", 2000))
-        return false;
     if (!wifi_expect_ok("P2=" WIFI_TCP_PORT, "Set Local Port", 2000))
         return false;
     if (!wifi_expect_ok("S1=1460", "Set Write Packet Size", 2000))
@@ -385,12 +292,30 @@ static bool wifi_setup_tcp_server(void)
 
 void wifi_init(UART_HandleTypeDef *huart)
 {
+    wifi_huart = huart;
+    rb_init();
+    wifi_cmd_pos = 0;
+    wifi_last_eol = 0;
+    wifi_prompt_deferred = false;
+    state = WIFI_STATE_INIT;
+    g_app.wifi_state = (uint8_t)state;
+
+    /* Arm RX interrupt before powering on so the module banner cannot leave
+       UART4 in an overrun state before the first AT response. */
+    __HAL_UART_CLEAR_OREFLAG(wifi_huart);
+    HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
+
+    HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
+                      GPIO_PIN_RESET);
+    HAL_Delay(3000);
+
+    rb_flush();
+
     shell_printf("[wifi] Initializing ISM4343 module...\r\n");
-    if (!wifi_power_on_and_sync(huart)) {
-        state = WIFI_STATE_ERROR;
-        g_app.wifi_state = (uint8_t)state;
-        return;
-    }
+
+    char sync_resp[RESP_BUF_SIZE];
+    wifi_send_cmd("", sync_resp, sizeof(sync_resp), 2000);
+    rb_flush();
 
     if (!wifi_setup_ap()) {
         state = WIFI_STATE_ERROR;
