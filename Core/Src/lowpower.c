@@ -213,10 +213,22 @@ static void lowpower_clear_event_latch(void)
 }
 
 /**
+ * @brief Prevent debug retention from keeping STOP2 current high.
+ */
+static void lowpower_disable_debug_in_stop(void)
+{
+#if defined(DBGMCU_CR_DBG_SLEEP) && defined(DBGMCU_CR_DBG_STOP) && defined(DBGMCU_CR_DBG_STANDBY)
+    CLEAR_BIT(DBGMCU->CR,
+              DBGMCU_CR_DBG_SLEEP | DBGMCU_CR_DBG_STOP | DBGMCU_CR_DBG_STANDBY);
+#endif
+}
+
+/**
  * @brief Enter STOP2 using WFE and return when an event wakes the CPU.
  */
 static void lowpower_enter_stop2_wfe(void)
 {
+    lowpower_disable_debug_in_stop();
     MODIFY_REG(PWR->CR1, PWR_CR1_LPMS, PWR_CR1_LPMS_STOP2);
     SET_BIT(SCB->SCR, (uint32_t)SCB_SCR_SLEEPDEEP_Msk);
     __DSB();
