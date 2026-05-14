@@ -69,8 +69,9 @@ core.*
 *.tar.gz
 *.rar
 
-# Visual Studio Code
+# Visual Studio Code & Zed
 .vscode/
+.zed/
 
 # Eclipse CDT
 .autotools
@@ -83,18 +84,11 @@ core.*
 STLinkLog.txt
 
 # Misc.
-.zed/
-.codex
 .github/
 log.txt
-vnsdk/
 nul
 matlab/
 logs/
 tmpc*
 reports.csv
-.clau*
-Records/Unit-Conversion.md
-Docs/IDATA_PROTOCOL.md
-Docs/CLOCK_CHECKLIST.md
 Records/
