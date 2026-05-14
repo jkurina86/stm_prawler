@@ -21,7 +21,7 @@ PORT = "COM10"
 BAUD = 9600
 TIMEOUT = 0.05
 
-AP_SSID = "prawler2"
+AP_SSID = "prawler123"
 AP_SECURITY = 0  # 0 = Open
 AP_IP = "192.168.10.1"
 TCP_PORT = 5000
@@ -141,7 +141,11 @@ def scan_response_has_ssid(resp, ssid):
     for line in resp.splitlines():
         stripped = line.strip()
         normalized = "".join(stripped.split())
-        if f"SSID:{ssid}" in normalized or human_ssid in stripped or quoted_ssid in stripped:
+        if (
+            f"SSID:{ssid}" in normalized
+            or human_ssid in stripped
+            or quoted_ssid in stripped
+        ):
             return True
 
         fields = [field.strip().strip('"') for field in stripped.split(",")]

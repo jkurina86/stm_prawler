@@ -85,10 +85,7 @@ STLinkLog.txt
 # Misc.
 .zed/
 .codex
-.claude*
 .github/
-AGENTS.md
-CLAUDE*
 log.txt
 vnsdk/
 nul
@@ -96,7 +93,6 @@ matlab/
 logs/
 tmpc*
 reports.csv
-.clau*
 Records/Unit-Conversion.md
 Docs/IDATA_PROTOCOL.md
 Docs/CLOCK_CHECKLIST.md

@@ -20,7 +20,7 @@ extern "C" {
 #include <stdbool.h>
 
 /* Configuration -------------------------------------------------------------*/
-#define WIFI_AP_SSID        "prawler123"
+#define WIFI_AP_SSID        "prawler1"
 #define WIFI_AP_SECURITY    "0"             /* 0 = Open */
 #define WIFI_AP_CHANNEL     "6"
 #define WIFI_AP_IP          "192.168.10.1"
