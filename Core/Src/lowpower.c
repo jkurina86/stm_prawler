@@ -98,26 +98,19 @@ static void lowpower_config_analog(GPIO_TypeDef *port, uint16_t pins, uint32_t p
 /**
  * @brief Force all MAX3226 UART transceivers off and park their MCU pins.
  */
-static void lowpower_max3226_transceivers_down(void)
+static void lowpower_transceivers_down(void)
 {
     /* MAX3226 pin 9 enables are active-high in this board design. */
-    lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin,
-                           MAX3226_ENABLE_OFF);
-    lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin,
-                           MAX3226_ENABLE_OFF);
-    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin,
-                           MAX3226_ENABLE_OFF);
+    lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin, MAX3226_ENABLE_OFF);
+    lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin, MAX3226_ENABLE_OFF);
+    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin, MAX3226_ENABLE_OFF);
 
     /* UART5 is enabled through the auxiliary decoder; 00 leaves it disabled. */
-    lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin,
-                           GPIO_PIN_RESET);
+    lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin, GPIO_PIN_RESET);
 
-    lowpower_config_analog(GPIOA,
-                           GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3,
-                           GPIO_NOPULL);
-    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_12,
-                           GPIO_NOPULL);
-    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_NOPULL);
+    lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_12, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_PULLDOWN);
 }
 
 /**
@@ -148,11 +141,10 @@ static void lowpower_unmount_filesystem(void)
 }
 
 /**
- * @brief Program the external RTC countdown timer as a one-shot wake source.
- * @param seconds Countdown interval in seconds.
+ * @brief Program the external RTC countdown timer as the STOP2 wake source.
  * @return RTC_OK on success, otherwise an RTC_Status_t error code.
  */
-static RTC_Status_t lowpower_program_rtc_countdown(uint16_t seconds)
+static RTC_Status_t lowpower_arm_rtc_wake(void)
 {
     RTC_Timer_t timer = {0};
     bool release_spi = lowpower_rtc_begin();
@@ -166,7 +158,7 @@ static RTC_Status_t lowpower_program_rtc_countdown(uint16_t seconds)
     }
 
     if (status == RTC_OK) {
-        timer.timer_value = seconds;
+        timer.timer_value = (uint16_t)LOWPOWER_RTC_WAKE_SECONDS;
         timer.division = RTC_TIMER_DIV_1HZ;
         timer.auto_reload = false;
         timer.enabled = false;
@@ -238,18 +230,18 @@ static void lowpower_clear_stop2_pending_irqs(void)
  */
 static void lowpower_clear_event_latch(void)
 {
-    __SEV();
-    __WFE();
+    __SEV(); /* Set event latch to wake up from WFE */
+    __WFE(); /* Wait for event to wake up CPU */
 }
 
 /**
  * @brief Prevent debug retention from keeping STOP2 current high.
+ *          This is probably not necessary and will be removed.
  */
 static void lowpower_disable_debug_in_stop(void)
 {
 #if defined(DBGMCU_CR_DBG_SLEEP) && defined(DBGMCU_CR_DBG_STOP) && defined(DBGMCU_CR_DBG_STANDBY)
-    CLEAR_BIT(DBGMCU->CR,
-              DBGMCU_CR_DBG_SLEEP | DBGMCU_CR_DBG_STOP | DBGMCU_CR_DBG_STANDBY);
+    CLEAR_BIT(DBGMCU->CR, DBGMCU_CR_DBG_SLEEP | DBGMCU_CR_DBG_STOP | DBGMCU_CR_DBG_STANDBY);
 #endif
 }
 
@@ -288,41 +280,36 @@ static bool lowpower_take_pending_record_trigger(void)
  */
 static bool lowpower_prepare_stop2_entry(bool *rtc_wake)
 {
+    /* Check for pending record trigger or start flag before entering STOP2 mode */
     if (lowpower_take_pending_record_trigger() || g_app.start_flag) {
         return false;
     }
 
+    /* Check for pending RTC interrupt before entering STOP2 mode */
     if (RTC_IsInterruptPending() || RTC_IsInterruptAsserted()) {
         *rtc_wake = true;
         return false;
     }
 
-    __HAL_GPIO_EXTI_CLEAR_IT(RECORD_TRIGGER_Pin);
-    __HAL_GPIO_EXTI_CLEAR_IT(RTC_INT_PIN);
-    lowpower_clear_stop2_pending_irqs();
-    lowpower_clear_event_latch();
-    __DSB();
-    __ISB();
+    __HAL_GPIO_EXTI_CLEAR_IT(RECORD_TRIGGER_Pin); /* Clear pending EXTI interrupts */
+    __HAL_GPIO_EXTI_CLEAR_IT(RTC_INT_PIN); /* Clear pending EXTI interrupts */
+    lowpower_clear_stop2_pending_irqs(); /* Clear pending STOP2 interrupts */
+    lowpower_clear_event_latch(); /* Clear event latch to avoid spurious wakeups */
+    __DSB(); /* Data Synchronization Barrier */
+    __ISB(); /* Instruction Synchronization Barrier */
 
+    /* Check for pending record trigger or start flag before entering STOP2 mode */
     if (lowpower_take_pending_record_trigger() || g_app.start_flag) {
         return false;
     }
 
+    /* Check for pending RTC interrupt before entering STOP2 mode */
     if (RTC_IsInterruptPending() || RTC_IsInterruptAsserted()) {
         *rtc_wake = true;
         return false;
     }
 
     return true;
-}
-
-/**
- * @brief Program the standard RTC wake timer used for STOP2 sleep windows.
- * @return RTC_OK on success, otherwise an RTC_Status_t error code.
- */
-static RTC_Status_t lowpower_program_rtc_wake_timer(void)
-{
-    return lowpower_program_rtc_countdown((uint16_t)LOWPOWER_RTC_WAKE_SECONDS);
 }
 
 /**
@@ -346,20 +333,20 @@ static void lowpower_start_idle_timer(uint32_t timeout_ms)
 /**
  * @brief Deinitialize the shell UART and park its pins for low power.
  */
-void lowpower_shell_uart_down(void)
+static void lowpower_shell_uart_down(void)
 {
     HAL_UART_AbortReceive_IT(&huart1);
     HAL_UART_Abort(&huart1);
     HAL_UART_DeInit(&huart1);
 
-    lowpower_config_analog(GPIOA, GPIO_PIN_9 | GPIO_PIN_10, GPIO_NOPULL);
+    lowpower_config_analog(GPIOA, GPIO_PIN_9 | GPIO_PIN_10, GPIO_PULLDOWN);
     lowpower_config_analog(GPIOA, GPIO_PIN_11 | GPIO_PIN_12, GPIO_NOPULL);
 }
 
 /**
  * @brief Restore the shell UART and resume interrupt-driven shell RX.
  */
-void lowpower_shell_uart_up(void)
+static void lowpower_shell_uart_up(void)
 {
     huart1.Instance = USART1;
     huart1.Init.BaudRate = 9600;
@@ -382,20 +369,20 @@ void lowpower_shell_uart_up(void)
 /**
  * @brief Deinitialize the optode UART path and mark the optode off.
  */
-void lowpower_optode_uart_down(void)
+static void lowpower_optode_uart_down(void)
 {
     HAL_UART_Abort(&huart2);
     HAL_UART_DeInit(&huart2);
 
     lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOA, GPIO_PIN_2 | GPIO_PIN_3, GPIO_NOPULL);
+    lowpower_config_analog(GPIOA, GPIO_PIN_2 | GPIO_PIN_3, GPIO_PULLDOWN);
     g_app.optode_status = PERIPH_OFF;
 }
 
 /**
  * @brief Restore the optode UART path and initialize the optode driver.
  */
-void lowpower_optode_uart_up(void)
+static void lowpower_optode_uart_up(void)
 {
     huart2.Instance = USART2;
     huart2.Init.BaudRate = 9600;
@@ -412,8 +399,7 @@ void lowpower_optode_uart_up(void)
         Error_Handler();
     }
 
-    lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin,
-                           GPIO_PIN_SET);
+    lowpower_config_output(PB1_USART2_EN_GPIO_Port, PB1_USART2_EN_Pin, GPIO_PIN_SET);
     optode_init(&huart2);
     g_app.optode_status = PERIPH_READY;
 }
@@ -421,20 +407,20 @@ void lowpower_optode_uart_up(void)
 /**
  * @brief Deinitialize the CTD UART path and mark the CTD off.
  */
-void lowpower_ctd_uart_down(void)
+static void lowpower_ctd_uart_down(void)
 {
     HAL_UART_Abort(&huart3);
     HAL_UART_DeInit(&huart3);
 
     lowpower_config_output(PB0_USART3_EN_GPIO_Port, PB0_USART3_EN_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5, GPIO_NOPULL);
+    lowpower_config_analog(GPIOC, GPIO_PIN_4 | GPIO_PIN_5, GPIO_PULLDOWN);
     g_app.ctd_status = PERIPH_OFF;
 }
 
 /**
  * @brief Restore the CTD UART path and initialize the CTD driver.
  */
-void lowpower_ctd_uart_up(void)
+static void lowpower_ctd_uart_up(void)
 {
     huart3.Instance = USART3;
     huart3.Init.BaudRate = 9600;
@@ -457,63 +443,23 @@ void lowpower_ctd_uart_up(void)
 }
 
 /**
- * @brief Power down the WiFi UART/module path and park its pins.
- */
-void lowpower_wifi_uart_down(void)
-{
-    wifi_down();
-    HAL_UART_Abort(&huart4);
-    HAL_UART_DeInit(&huart4);
-
-    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin,
-                           MAX3226_ENABLE_OFF);
-    lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
-    lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_NOPULL);
-}
-
-/**
- * @brief Restore the WiFi UART pins and module control lines.
- */
-void lowpower_wifi_uart_up(void)
-{
-    huart4.Instance = UART4;
-    huart4.Init.BaudRate = 9600;
-    huart4.Init.WordLength = UART_WORDLENGTH_8B;
-    huart4.Init.StopBits = UART_STOPBITS_1;
-    huart4.Init.Parity = UART_PARITY_NONE;
-    huart4.Init.Mode = UART_MODE_TX_RX;
-    huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-    huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-    huart4.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-    huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-
-    if (HAL_UART_Init(&huart4) != HAL_OK) {
-        Error_Handler();
-    }
-
-    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin,
-                           MAX3226_ENABLE_ON);
-    lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
-}
-
-/**
  * @brief Deinitialize the WetLab UART path and mark WetLab off.
  */
-void lowpower_wetlab_uart_down(void)
+static void lowpower_wetlab_uart_down(void)
 {
     HAL_UART_Abort(&huart5);
     HAL_UART_DeInit(&huart5);
 
     lowpower_config_output(GPIOB, PB4_AUX_SEL_A0_Pin | PB5_AUX_SEL_A1_Pin, GPIO_PIN_RESET);
-    lowpower_config_analog(GPIOC, GPIO_PIN_12, GPIO_NOPULL);
-    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_NOPULL);
+    lowpower_config_analog(GPIOC, GPIO_PIN_12, GPIO_PULLDOWN);
+    lowpower_config_analog(GPIOD, GPIO_PIN_2, GPIO_PULLDOWN);
     g_app.wetlab_status = PERIPH_OFF;
 }
 
 /**
  * @brief Restore the WetLab UART path and initialize the WetLab driver.
  */
-void lowpower_wetlab_uart_up(void)
+static void lowpower_wetlab_uart_up(void)
 {
     huart5.Instance = UART5;
     huart5.Init.BaudRate = 19200;
@@ -593,7 +539,7 @@ void lowpower_sd_spi_up(void)
 /**
  * @brief Deinitialize the external RTC SPI path and park its pins.
  */
-void lowpower_rtc_spi_down(void)
+static void lowpower_rtc_spi_down(void)
 {
     lowpower_restore_rtc_ce_pin();
     HAL_SPI_DeInit(&hspi2);
@@ -605,7 +551,7 @@ void lowpower_rtc_spi_down(void)
 /**
  * @brief Restore and reinitialize the external RTC SPI path.
  */
-void lowpower_rtc_spi_up(void)
+static void lowpower_rtc_spi_up(void)
 {
     lowpower_restore_rtc_ce_pin();
 
@@ -683,19 +629,10 @@ void lowpower_restart_timer(void)
 }
 
 /**
- * @brief Report whether the automatic idle sleep timer is enabled.
- * @return true if the idle timer is enabled, otherwise false.
- */
-bool lowpower_idle_timer_enabled(void)
-{
-    return g_lowpower_state.idle_timer_enabled;
-}
-
-/**
  * @brief Get elapsed time for the currently active idle timer.
  * @return Elapsed idle time in milliseconds, or 0 if the timer is inactive.
  */
-uint32_t lowpower_idle_elapsed_ms(void)
+static uint32_t lowpower_idle_elapsed_ms(void)
 {
     if (!g_lowpower_state.idle_timer_active) {
         return 0;
@@ -793,7 +730,23 @@ void lowpower_rtc_end(bool release_spi)
  */
 void lowpower_wifi_start(void)
 {
-    lowpower_wifi_uart_up();
+    huart4.Instance = UART4;
+    huart4.Init.BaudRate = 9600;
+    huart4.Init.WordLength = UART_WORDLENGTH_8B;
+    huart4.Init.StopBits = UART_STOPBITS_1;
+    huart4.Init.Parity = UART_PARITY_NONE;
+    huart4.Init.Mode = UART_MODE_TX_RX;
+    huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+    huart4.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+    huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+    if (HAL_UART_Init(&huart4) != HAL_OK) {
+        Error_Handler();
+    }
+
+    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin, MAX3226_ENABLE_ON);
+    lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
     wifi_init(&huart4);
 }
 
@@ -802,7 +755,13 @@ void lowpower_wifi_start(void)
  */
 void lowpower_wifi_stop(void)
 {
-    lowpower_wifi_uart_down();
+    wifi_down();
+    HAL_UART_Abort(&huart4);
+    HAL_UART_DeInit(&huart4);
+
+    lowpower_config_output(UART4_MAX3226_EN_GPIO_Port, UART4_MAX3226_EN_Pin, MAX3226_ENABLE_OFF);
+    lowpower_config_output(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
+    lowpower_config_analog(GPIOA, GPIO_PIN_0 | GPIO_PIN_1, GPIO_PULLDOWN);
 }
 
 /**
@@ -828,15 +787,6 @@ bool lowpower_request_on(void)
     g_lowpower_state.pending = true;
     g_lowpower_state.quiet_sleep_entry = false;
     return true;
-}
-
-/**
- * @brief Report whether a low-power sleep request is pending.
- * @return true if sleep service work is pending, otherwise false.
- */
-bool lowpower_is_pending(void)
-{
-    return g_lowpower_state.pending;
 }
 
 /**
@@ -894,7 +844,7 @@ static void lowpower_service_idle_timer(void)
  * @brief Save active power state and shut peripherals down for STOP2 entry.
  * @return true if the system was prepared for sleep, otherwise false.
  */
-bool lowpower_prepare_for_sleep(void)
+static bool lowpower_prepare_for_sleep(void)
 {
     if (g_lowpower_state.prepared) {
         return true;
@@ -906,10 +856,9 @@ bool lowpower_prepare_for_sleep(void)
     g_lowpower_state.idle_timer_active = false;
     g_lowpower_state.idle_timeout_ms = LOWPOWER_IDLE_TIMEOUT_MS;
 
-    RTC_Status_t rtc_status = lowpower_program_rtc_wake_timer();
+    RTC_Status_t rtc_status = lowpower_arm_rtc_wake();
     if (rtc_status != RTC_OK) {
-        shell_printf("[lowpower] RTC wake timer setup failed (err=%d)\r\n",
-                     rtc_status);
+        shell_printf("[lowpower] RTC wake timer setup failed (err=%d)\r\n", rtc_status);
         return false;
     }
 
@@ -926,8 +875,8 @@ bool lowpower_prepare_for_sleep(void)
     lowpower_wetlab_uart_down();
     lowpower_optode_uart_down();
     lowpower_ctd_uart_down();
-    lowpower_wifi_uart_down();
-    lowpower_max3226_transceivers_down();
+    lowpower_wifi_stop();
+    lowpower_transceivers_down();
     lowpower_shell_uart_down();
 
     g_lowpower_state.profile_peripherals_up = false;
@@ -938,7 +887,7 @@ bool lowpower_prepare_for_sleep(void)
 /**
  * @brief Restore peripherals and saved state after returning from STOP2.
  */
-void lowpower_restore_from_sleep(void)
+static void lowpower_restore_from_sleep(void)
 {
     if (!g_lowpower_state.prepared) {
         return;

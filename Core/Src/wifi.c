@@ -6,7 +6,7 @@
   *
   *          Boot sequence uses AT commands to configure AP and TCP server,
   *          then issues PX=0,0 to enter streaming mode.  After that, all
-  *          UART data flows directly to/from the connected TCP client --
+  *          UART data flows directly to/from the connected TCP client:
   *          no AT command framing.
   *
   *          wifi_service() implements a WiFi shell: assembles incoming
@@ -278,7 +278,7 @@ static bool wifi_setup_tcp_server(void)
     if (!wifi_expect_ok("PK=1,30000", "Enable TCP Keep-Alive", 2000))
         return false;
 
-    /* Enter streaming mode -- this is the last AT command.  On success the
+    /* Enter streaming mode: this is the last AT command.  On success the
        module stays in streaming mode and does not return an AT prompt. */
     if (!wifi_enter_server_streaming()) {
         return false;
@@ -305,7 +305,7 @@ void wifi_init(UART_HandleTypeDef *huart)
     state = WIFI_STATE_INIT;
     g_app.wifi_state = (uint8_t)state;
 
-    /* Arm RX interrupt before powering on so the module banner cannot leave
+    /* Arm RX interrupt before powering on so the boot banner won't leave
        UART4 in an overrun state before the first AT response. */
     __HAL_UART_CLEAR_OREFLAG(wifi_huart);
     HAL_UART_Receive_IT(wifi_huart, &rx_byte, 1);
@@ -397,13 +397,13 @@ uint32_t wifi_get_rx_count(void)
     return wifi_rx_count;
 }
 
-/* Main-loop service -- WiFi shell -------------------------------------------*/
+/* Main-loop service/WiFi shell -------------------------------------------*/
 
 /**
  * @brief  Non-blocking WiFi shell, call from main loop.
  *
  *  Drains the RX ring buffer, assembles command lines, and dispatches
- *  them via the shared shell command table.  Sends "$ " prompt back
+ *  them via the shared shell command table. Sends "$ " prompt back
  *  over WiFi after each command (or empty line).
  */
 void wifi_service(void)

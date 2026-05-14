@@ -138,9 +138,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   /* Turn off wifi to bring it to a known state */
-  HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin,
-                    GPIO_PIN_SET);
-  HAL_Delay(5000);
+  HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
+  HAL_Delay(2000);
 
   shell_printf("\r\nSystem Initialization...\r\n");
 
@@ -149,6 +148,8 @@ int main(void)
   tasker_init();
 
   filesystem_init();
+
+  /* Initialize SD card and filesystem, mounts the FS, unmounts it, powers down the SD card, and powers down SPI1 */
   lowpower_sd_spi_up();
   FS_Result_t fs_status = filesystem_mount();
   if (fs_status == FS_OK || fs_status == FS_ALREADY_MOUNTED) {
@@ -183,7 +184,7 @@ int main(void)
   lowpower_idle_peripherals_down();
   lowpower_wifi_start();
   shell_init();
-  lowpower_enter_idle();
+  lowpower_enter_idle(); /* Start the low power idle timer */
 
   /* USER CODE END 2 */
 

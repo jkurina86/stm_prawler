@@ -16,26 +16,8 @@ extern "C" {
 #include <stdint.h>
 
 /* Individual peripheral / pin-group helpers --------------------------------*/
-void lowpower_shell_uart_down(void);
-void lowpower_shell_uart_up(void);
-
-void lowpower_optode_uart_down(void);
-void lowpower_optode_uart_up(void);
-
-void lowpower_ctd_uart_down(void);
-void lowpower_ctd_uart_up(void);
-
-void lowpower_wifi_uart_down(void);
-void lowpower_wifi_uart_up(void);
-
-void lowpower_wetlab_uart_down(void);
-void lowpower_wetlab_uart_up(void);
-
 void lowpower_sd_spi_down(void);
 void lowpower_sd_spi_up(void);
-
-void lowpower_rtc_spi_down(void);
-void lowpower_rtc_spi_up(void);
 
 /* Aggregated low-power flow -------------------------------------------------*/
 void lowpower_init(void);
@@ -43,8 +25,6 @@ void lowpower_enter_idle(void);
 void lowpower_note_activity(void);
 void lowpower_stay_awake(void);
 void lowpower_restart_timer(void);
-bool lowpower_idle_timer_enabled(void);
-uint32_t lowpower_idle_elapsed_ms(void);
 void lowpower_idle_peripherals_down(void);
 void lowpower_profile_peripherals_up(void);
 void lowpower_profile_peripherals_down(void);
@@ -56,9 +36,6 @@ void lowpower_wifi_stop(void);
 void lowpower_start_wifi_duty_cycle(void);
 bool lowpower_request_on(void);
 void lowpower_service(void);
-bool lowpower_is_pending(void);
-bool lowpower_prepare_for_sleep(void);
-void lowpower_restore_from_sleep(void);
 
 #ifdef __cplusplus
 }

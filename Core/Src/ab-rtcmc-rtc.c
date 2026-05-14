@@ -115,6 +115,7 @@ static uint8_t RTC_InterruptMaskToStatusMask(uint8_t interrupt_mask) {
   */
 RTC_Status_t RTC_Init(void) {
     g_rtc_interrupt_pending = false;
+    HAL_GPIO_WritePin(RTC_CLKOE_PORT, RTC_CLKOE_PIN, GPIO_PIN_RESET);
 
     /* Ensure CS pin is Low */
     RTC_CS_DESELECT();
