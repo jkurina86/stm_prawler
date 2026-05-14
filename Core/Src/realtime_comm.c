@@ -1,116 +1,257 @@
 /**
   ******************************************************************************
   * @file    realtime_comm.c
-  * @brief   Realtime CSV streaming over WiFi
-  * @note    Reads the last recording CSV from SD, transforms each row into a
-  *          compact integer-scaled format, and streams it line-by-line over
-  *          the WiFi TCP connection.
+  * @brief   Realtime hex-encoded CSV streaming over WiFi.
+ * @note    After each profile finishes normalizing, realtime_comm_build()
+ *          formats the CSV payload into rt_buf and caches its frame CRC/length.
+ *          realtime_comm_stream() sends "@@@" + CRC + length + "\n", then
+ *          the CSV payload bytes.
   ******************************************************************************
   */
 
 #include "realtime_comm.h"
-#include "recorder.h"
-#include "filesystem.h"
 #include "wifi.h"
 #include "shell.h"
-#include <stdlib.h>
-#include <string.h>
+#include "lowpower.h"
+#include <stdint.h>
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define GPS_TO_UNIX_OFFSET  315964800UL
-#define RT_LINE_SIZE        256
+#define RT_BUF_SIZE          12288   /* 12 KB: fits worst-case variable-width realtime CSV */
+#define RT_LEN_ASCII_LEN     4U
 
 /* Private variables ---------------------------------------------------------*/
-static char rt_line[RT_LINE_SIZE];
-
-/* Private functions ---------------------------------------------------------*/
+static char rt_buf[RT_BUF_SIZE] __attribute__((section(".ram2_bss")));
+static uint16_t rt_len;
+static uint16_t rt_crc;
+/* Flag prevents re-sending the same profile. Initialized to 1 so a
+ * realtime request before any profile has been built reports No_Data. */
+static uint8_t data_sent = 1;
 
 /**
-  * @brief  Skip past n comma-separated fields in a CSV line
-  * @param  p Pointer into CSV line
-  * @param  n Number of fields to skip
-  * @retval Pointer to start of the (n+1)th field, or NULL
-  */
-static const char *csv_skip(const char *p, int n)
+ * @brief Fold one byte into the CRC-16/XMODEM accumulator.
+ * @param accum Current widened CRC accumulator.
+ * @param ch Input byte to add.
+ * @return Updated widened CRC accumulator.
+ */
+static uint32_t rt_crc16_xmodem_accum(uint32_t accum, uint8_t ch)
 {
-    while (n > 0 && *p) {
-        if (*p == ',') n--;
-        p++;
+    accum |= (uint32_t)ch;
+
+    for (uint8_t bit = 0; bit < 8; bit++) {
+        accum <<= 1;
+        if (accum & 0x1000000UL) {
+            accum ^= 0x102100UL;
+        }
     }
-    return (n == 0) ? p : NULL;
+
+    return accum;
+}
+
+/**
+ * @brief Update the CRC-16/XMODEM accumulator with a byte span.
+ * @param accum Current widened CRC accumulator.
+ * @param data Data bytes to include in the CRC.
+ * @param len Number of bytes in data.
+ * @return Updated widened CRC accumulator.
+ */
+static uint32_t rt_crc16_xmodem_update(uint32_t accum, const uint8_t *data, uint16_t len)
+{
+    for (uint16_t i = 0; i < len; i++) {
+        accum = rt_crc16_xmodem_accum(accum, data[i]);
+    }
+
+    return accum;
+}
+
+/**
+ * @brief Apply the CRC-16/XMODEM final zero-byte augmentations.
+ * @param accum Current widened CRC accumulator.
+ * @return Final 16-bit CRC value.
+ */
+static uint16_t rt_crc16_xmodem_finish(uint32_t accum)
+{
+    /* CRC-16/XMODEM-compatible finish: init 0x0000, poly 0x1021,
+     * two final zero-byte augmentations. Check "123456789" -> 0x31C3. */
+    accum = rt_crc16_xmodem_accum(accum, 0U);
+    accum = rt_crc16_xmodem_accum(accum, 0U);
+
+    return (uint16_t)(accum >> 8);
 }
 
 /* Public functions ----------------------------------------------------------*/
 
+/**
+ * @brief Build the realtime CSV payload and cache its frame metadata.
+ * @param profile Normalized profile data to serialize for realtime transfer.
+ */
+void realtime_comm_build(const profile_data_t *profile)
+{
+    char *csv_buf = rt_buf;
+    char len_ascii[RT_LEN_ASCII_LEN + 1U];
+    size_t csv_capacity = RT_BUF_SIZE;
+    uint32_t crc_accum = 0;
+    uint16_t csv_len;
+    uint16_t rows_built = 0;
+    bool has_optode = false;
+    bool has_wetlab = false;
+
+    switch (profile->sensor_level) {
+    case SENSOR_CFG_CTD_ONLY:
+        break;
+    case SENSOR_CFG_CTD_OPTODE:
+        has_optode = true;
+        break;
+    case SENSOR_CFG_ALL:
+    default:
+        has_optode = true;
+        has_wetlab = true;
+        break;
+    }
+
+    rt_len = 0;
+    rt_crc = 0;
+    data_sent = 0;
+    lowpower_note_activity();
+
+    /* Create the header based on sensor configuration */
+    int n;
+    if (has_wetlab && has_optode) {
+        n = snprintf(csv_buf, csv_capacity,
+                     "EP,CD,CT,CC,OT,O2,CH,TB,CD\n");
+    } else if (!has_wetlab && has_optode) {
+        n = snprintf(csv_buf, csv_capacity,
+                     "EP,CD,CT,CC,OT,O2\n");
+    } else {
+        n = snprintf(csv_buf, csv_capacity,
+                     "EP,CD,CT,CC\n");
+    }
+
+    if (n < 0 || (size_t)n >= csv_capacity) {
+        return;
+    }
+
+    /* Initialize the CSV length */
+    csv_len = (uint16_t)n;
+
+    for (uint16_t i = 0; i < profile->count; i++) {
+        /* Select the active row */
+        const measurement_data_t *m = &profile->measurements[i];
+
+        /* Scale the values */
+        int16_t depth = (int16_t)(m->ctd.pressure * 100.0f);
+        int16_t temp = (int16_t)(m->ctd.temperature * 1000.0f);
+        int16_t cond = (int16_t)(m->ctd.conductivity * 10000.0f);
+        uint16_t o2 = (uint16_t)(m->optode.o2_concentration * 100.0f);
+        uint16_t o2temp = (uint16_t)(m->optode.temperature * 1000.0f);
+
+        /* Build the new CSV row based on sensor configuration */
+        int w;
+        if (has_wetlab) {
+            w = snprintf(csv_buf + csv_len, csv_capacity - csv_len,
+                         "%08lx,%04x,%04x,%04x,%04x,%04x,%04x,%04x,%04x\n",
+                         (unsigned long)m->timestamp,
+                         (uint16_t)depth,
+                         (uint16_t)temp,
+                         (uint16_t)cond,
+                         o2temp,
+                         o2,
+                         (uint16_t)m->wetlab.ch1_signal,
+                         (uint16_t)m->wetlab.ch2_signal,
+                         (uint16_t)m->wetlab.ch3_signal);
+        } else if (has_optode) {
+            w = snprintf(csv_buf + csv_len, csv_capacity - csv_len,
+                         "%08lx,%04x,%04x,%04x,%04x,%04x\n",
+                         (unsigned long)m->timestamp,
+                         (uint16_t)depth,
+                         (uint16_t)temp,
+                         (uint16_t)cond,
+                         o2temp,
+                         o2);
+        } else {
+            w = snprintf(csv_buf + csv_len, csv_capacity - csv_len,
+                         "%08lx,%04x,%04x,%04x\n",
+                         (unsigned long)m->timestamp,
+                         (uint16_t)depth,
+                         (uint16_t)temp,
+                         (uint16_t)cond);
+        }
+
+        if (w < 0 || (size_t)w >= (csv_capacity - csv_len)) {
+            break;
+        }
+
+        /* Update CSV length */
+        csv_len += (uint16_t)w;
+        rows_built++;
+    }
+
+    /* Create an ASCII-Encoded hex-length string */
+    (void)snprintf(len_ascii, sizeof(len_ascii), "%04X", csv_len);
+
+    /* CRC covers the ASCII length field plus CSV payload bytes only. It does
+     * not cover the "@@@" preamble or CRC field. */
+    crc_accum = rt_crc16_xmodem_update(crc_accum, (const uint8_t *)len_ascii, RT_LEN_ASCII_LEN);
+
+    /* Add the CSV data to the CRC. */
+    crc_accum = rt_crc16_xmodem_update(crc_accum, (const uint8_t *)rt_buf, csv_len);
+
+    /* Finish the CRC calculation */
+    rt_crc = rt_crc16_xmodem_finish(crc_accum);
+
+    /* Update the length of the realtime data transfer */
+    rt_len = csv_len;
+
+    shell_printf("[realtime] Built %u rows (%u-byte CSV)\r\n", rows_built, rt_len);
+}
+
+/**
+ * @brief Stream the cached realtime payload to the WiFi TCP client.
+ */
 void realtime_comm_stream(void)
 {
+    /* Guard to ensure WiFi is in passthrough mode */
     if (wifi_get_state() != WIFI_STATE_STREAMING) {
         shell_print("[realtime] WiFi not streaming\r\n");
+        shell_print(SHELL_PROMPT);
         return;
     }
 
-    const char *fname = recorder_get_last_filename();
-    if (fname == NULL) {
-        shell_print("[realtime] No recording available\r\n");
-        wifi_printf("[realtime] No recording available\r\n");
+    /* No_Data case */
+    if (data_sent || rt_len == 0) {
+        shell_print("[realtime] No_Data\r\n");
+        wifi_printf("No_Data\r\n");
+        wifi_prompt();
+        shell_print(SHELL_PROMPT);
         return;
     }
 
-    shell_printf("[realtime] Streaming %s\r\n", fname);
+    /* Sent-byte counter */
+    uint16_t sent = 0;
 
-    if (filesystem_open_read(fname) != FS_OK) {
-        shell_print("[realtime] Open failed\r\n");
-        return;
-    }
+    /* Send the Preamble */
+    wifi_printf("@@@%04X%04X", rt_crc, rt_len);
 
-    /* Skip source CSV header */
-    if (filesystem_readline(rt_line, RT_LINE_SIZE) != FS_OK) {
-        shell_print("[realtime] Empty file\r\n");
-        filesystem_close_read();
-        return;
-    }
+    /* Increment the sent-byte counter */
+    sent += 3U + 4U + 4U;
 
-    /* Send header */
-    wifi_printf("datetime,depth,temp,cond,chl,ntu,cdom,o2,o2temp\r\n");
+    /* Send the CSV Data */
+    sent += wifi_write((const uint8_t *)rt_buf, rt_len);
 
-    /* Stream rows line-by-line */
-    uint32_t line_count = 0;
-    while (filesystem_readline(rt_line, RT_LINE_SIZE) == FS_OK) {
-        const char *p = rt_line;
+    /* Set the data_sent flag */
+    data_sent = 1;
+    lowpower_note_activity();
+    wifi_prompt();
 
-        /* Navigate to needed fields (0-indexed) */
-        const char *f1  = csv_skip(p, 1);   /* GPS_Epoch_UTC */
-        const char *f2  = csv_skip(p, 2);   /* CTD_C */
-        const char *f3  = csv_skip(p, 3);   /* CTD_T */
-        const char *f4  = csv_skip(p, 4);   /* CTD_D */
-        const char *f5  = csv_skip(p, 5);   /* Optode_O2 */
-        const char *f6  = csv_skip(p, 6);   /* Optode_Temp */
-        const char *f15 = csv_skip(p, 15);  /* Wetlab_C1_signal */
-        const char *f17 = csv_skip(p, 17);  /* Wetlab_C2_signal */
-        const char *f19 = csv_skip(p, 19);  /* Wetlab_C3_signal */
+    shell_printf("[realtime] Sent %u bytes (%u-byte CSV)\r\n", sent, rt_len);
+    shell_print(SHELL_PROMPT);
+}
 
-        if (!f1 || !f2 || !f3 || !f4 || !f5 || !f6 || !f15 || !f17 || !f19)
-            continue;
-
-        uint32_t gps_epoch = strtoul(f1, NULL, 10);
-        uint32_t datetime  = gps_epoch + GPS_TO_UNIX_OFFSET;
-        int32_t  depth     = (int32_t)(strtof(f4, NULL) * 100);
-        int32_t  temp      = (int32_t)(strtof(f3, NULL) * 1000);
-        int32_t  cond      = (int32_t)(strtof(f2, NULL) * 10000);
-        uint16_t chl       = (uint16_t)strtoul(f15, NULL, 10);
-        uint16_t ntu       = (uint16_t)strtoul(f17, NULL, 10);
-        uint16_t cdom      = (uint16_t)strtoul(f19, NULL, 10);
-        int32_t  o2        = (int32_t)(strtof(f5, NULL) * 100);
-        int32_t  o2temp    = (int32_t)(strtof(f6, NULL) * 1000);
-
-        wifi_printf("%lu,%ld,%ld,%ld,%u,%u,%u,%ld,%ld\r\n",
-                    datetime, depth, temp, cond,
-                    chl, ntu, cdom, o2, o2temp);
-        line_count++;
-    }
-
-    filesystem_close_read();
-
-    shell_printf("[realtime] Sent %lu lines\r\n", line_count);
+/**
+ * @brief Report whether a built realtime payload is waiting to be sent.
+ * @return true if unsent realtime data is pending, otherwise false.
+ */
+bool realtime_comm_data_pending(void)
+{
+    return data_sent == 0;
 }

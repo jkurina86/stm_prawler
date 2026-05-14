@@ -43,6 +43,19 @@
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
 static volatile DSTATUS Stat = STA_NOINIT;
+extern Disk_drvTypeDef disk;
+extern Diskio_drvTypeDef USER_Driver;
+
+void USER_diskio_reset(void)
+{
+  USER_SPI_reset();
+
+  for (uint8_t i = 0; i < _VOLUMES; i++) {
+    if (disk.drv[i] == &USER_Driver) {
+      disk.is_initialized[i] = 0;
+    }
+  }
+}
 
 /* USER CODE END DECL */
 

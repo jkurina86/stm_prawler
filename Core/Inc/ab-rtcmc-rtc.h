@@ -26,6 +26,8 @@ extern "C" {
 #define RTC_CLKOE_PORT     GPIOC
 #define RTC_CLKOUT_PIN     GPIO_PIN_7
 #define RTC_CLKOUT_PORT    GPIOC
+#define RTC_INT_PIN        RTC_INTod_Pin
+#define RTC_INT_PORT       RTC_INTod_GPIO_Port
 #define RTC_CS_PIN         GPIO_PIN_12
 #define RTC_CS_PORT        GPIOB
 
@@ -100,6 +102,14 @@ extern "C" {
 #define RTC_CTRL_INT_V1IE           (1 << 2)  /* Voltage 1 Interrupt Enable */
 #define RTC_CTRL_INT_V2IE           (1 << 3)  /* Voltage 2 Interrupt Enable */
 #define RTC_CTRL_INT_SRIE           (1 << 4)  /* Self Recovery Interrupt Enable */
+#define RTC_INTERRUPT_ALARM         RTC_CTRL_INT_AIE
+#define RTC_INTERRUPT_TIMER         RTC_CTRL_INT_TIE
+#define RTC_INTERRUPT_VLOW1         RTC_CTRL_INT_V1IE
+#define RTC_INTERRUPT_VLOW2         RTC_CTRL_INT_V2IE
+#define RTC_INTERRUPT_SELF_RECOVERY RTC_CTRL_INT_SRIE
+#define RTC_INTERRUPT_MASK_ALL      (RTC_INTERRUPT_ALARM | RTC_INTERRUPT_TIMER | \
+                                     RTC_INTERRUPT_VLOW1 | RTC_INTERRUPT_VLOW2 | \
+                                     RTC_INTERRUPT_SELF_RECOVERY)
 
 /* Control_INT_Flag register bits (0x02) */
 #define RTC_CTRL_INT_FLAG_AF        (1 << 0)  /* Alarm Flag */
@@ -125,11 +135,11 @@ extern "C" {
 /* Alarm Enable bits (bit 7 of each alarm register) */
 #define RTC_ALARM_ENABLE            (1 << 7)  /* Alarm Enable bitmask */
 
-/* Timer Division values */
-#define RTC_TIMER_DIV_4096HZ        0x00      /* 4096 Hz */
-#define RTC_TIMER_DIV_64HZ          0x20      /* 64 Hz (TD0=1) */
-#define RTC_TIMER_DIV_1HZ           0x40      /* 1 Hz (TD1=1) */
-#define RTC_TIMER_DIV_1_60HZ        0x60      /* 1/60 Hz (TD1=1, TD0=1) */
+/* Countdown Timer source clock values (Control_1 TD1:TD0) */
+#define RTC_TIMER_DIV_32HZ          0x00      /* 32 Hz */
+#define RTC_TIMER_DIV_8HZ           0x20      /* 8 Hz */
+#define RTC_TIMER_DIV_1HZ           0x40      /* 1 Hz */
+#define RTC_TIMER_DIV_0_5HZ         0x60      /* 0.5 Hz */
 
 /* EEPROM Control register bits (0x30) */
 #define RTC_EEPROM_CTRL_THP         (1 << 0)  /* Temperature High/Positive */
@@ -140,33 +150,40 @@ extern "C" {
 #define RTC_EEPROM_CTRL_R5K         (1 << 5)  /* 5k resistor */
 #define RTC_EEPROM_CTRL_R20K        (1 << 6)  /* 20k resistor */
 #define RTC_EEPROM_CTRL_R80K        (1 << 7)  /* 80k resistor */
+#define RTC_EEPROM_CTRL_TRICKLE_MASK (RTC_EEPROM_CTRL_R1K | RTC_EEPROM_CTRL_R5K | \
+                                      RTC_EEPROM_CTRL_R20K | RTC_EEPROM_CTRL_R80K)
 
 /* Data structures -----------------------------------------------------------*/
+
+/* Public date/alarm fields use binary values. The driver converts active fields
+ * to and from the RTC clock/alarm registers, which are BCD-encoded internally.
+ * Weekday fields are intentionally unused by firmware. The current driver
+ * supports 24-hour mode only. */
 typedef struct {
     uint8_t seconds;    /* 0-59 */
     uint8_t minutes;    /* 0-59 */
-    uint8_t hours;      /* 0-23 (24h) or 1-12 (12h) */
+    uint8_t hours;      /* 0-23 */
     uint8_t days;       /* 1-31 (day of month) */
-    uint8_t weekdays;   /* 1-7 (1=Sunday, stored in BCD format) */
+    uint8_t weekdays;   /* Unused; ignored by firmware */
     uint8_t months;     /* 1-12 */
-    uint8_t years;      /* 0-99 (20xx) */
-    bool is_12h_format; /* true for 12h, false for 24h */
-    bool is_pm;         /* true for PM in 12h format */
+    uint8_t years;      /* 0-79 (2000-2079) */
+    bool is_12h_format; /* Reserved for future 12h support; currently false */
+    bool is_pm;         /* Reserved for future 12h support; currently false */
 } RTC_DateTime_t;
 
 typedef struct {
     uint8_t seconds;     /* 0-59 */
     uint8_t minutes;     /* 0-59 */
-    uint8_t hours;       /* 0-23 (24h) or 1-12 (12h) */
+    uint8_t hours;       /* 0-23 */
     uint8_t days;        /* 1-31 (day of month) */
-    uint8_t weekdays;    /* 1=Sunday to 7=Saturday (BCD format) */
+    uint8_t weekdays;    /* Unused; ignored by firmware */
     uint8_t months;      /* 1-12 */
-    uint8_t years;       /* 0-99 (20xx) */
+    uint8_t years;       /* 0-79 (2000-2079) */
     bool seconds_enable; /* Enable seconds alarm */
     bool minutes_enable; /* Enable minutes alarm */
     bool hours_enable;   /* Enable hours alarm */
     bool days_enable;    /* Enable days alarm */
-    bool weekdays_enable;/* Enable weekdays alarm */
+    bool weekdays_enable;/* Unused; weekday alarm matching is always disabled */
     bool months_enable;  /* Enable months alarm */
     bool years_enable;   /* Enable years alarm */
 } RTC_ExtendedAlarm_t;
@@ -174,17 +191,23 @@ typedef struct {
 typedef struct {
     uint8_t seconds;    /* 0-59 */
     uint8_t minutes;    /* 0-59 */
-    uint8_t hours;      /* 0-23 (24h) or 1-12 (12h) */
+    uint8_t hours;      /* 0-23 */
     uint8_t date;       /* 1-31 */
     bool enabled;       /* Alarm enable/disable */
 } RTC_Alarm_t;
 
 typedef struct {
-    uint16_t timer_value;  /* 16-bit timer value */
-    uint8_t division;      /* Timer division setting */
-    bool auto_reload;      /* Auto reload enable */
-    bool enabled;          /* Timer enable */
+    uint16_t timer_value;  /* 16-bit countdown value */
+    uint8_t division;      /* RTC_TIMER_DIV_* countdown source clock */
+    bool auto_reload;      /* Countdown auto-reload enable */
+    bool enabled;          /* Countdown timer enable */
 } RTC_Timer_t;
+
+typedef struct {
+    uint8_t enabled_mask;  /* Control_INT register bits */
+    uint8_t flag_mask;     /* Control_INT Flag register bits */
+    uint8_t status_flags;  /* Control_Status register bits */
+} RTC_InterruptState_t;
 
 typedef enum {
     RTC_OK = 0,            /* Given a value of zero for error accumulation */
@@ -222,11 +245,19 @@ RTC_Status_t RTC_SetTimerDivision(uint8_t division);
 /* Interrupt and flag operations */
 bool RTC_IsAlarmTriggered(void);
 bool RTC_IsTimerTriggered(void);
+RTC_Status_t RTC_GetInterruptFlags(uint8_t *flags);
+RTC_Status_t RTC_GetStatusFlags(uint8_t *status);
+RTC_Status_t RTC_GetInterruptState(RTC_InterruptState_t *state);
+RTC_Status_t RTC_ClearInterruptSources(uint8_t interrupt_mask);
 RTC_Status_t RTC_ClearAlarmFlag(void);
 RTC_Status_t RTC_ClearTimerFlag(void);
 RTC_Status_t RTC_ClearAllFlags(void);
 RTC_Status_t RTC_EnableInterrupt(uint8_t interrupt_mask);
 RTC_Status_t RTC_DisableInterrupt(uint8_t interrupt_mask);
+void RTC_NotifyInterrupt(void);
+bool RTC_IsInterruptPending(void);
+void RTC_ClearPendingInterrupt(void);
+bool RTC_IsInterruptAsserted(void);
 
 /* Temperature operations */
 RTC_Status_t RTC_GetTemperature(int8_t* temperature);

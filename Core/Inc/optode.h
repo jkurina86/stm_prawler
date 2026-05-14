@@ -34,7 +34,6 @@ typedef struct {
 void optode_init(UART_HandleTypeDef *huart);
 bool optode_sample(optode_data_t *out);
 void optode_listen(void);
-void optode_setup(void);
 
 /* Split-phase API for simultaneous sampling */
 void optode_wake(void);

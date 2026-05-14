@@ -19,12 +19,15 @@
 
 /* Private variables ---------------------------------------------------------*/
 extern SPI_HandleTypeDef hspi2;
+static volatile bool g_rtc_interrupt_pending;
 
 /* Private function prototypes -----------------------------------------------*/
 static RTC_Status_t RTC_SPITransmit(uint8_t* data, uint16_t size);
 static RTC_Status_t RTC_SPITransmitReceive(uint8_t* tx_data, uint8_t* rx_data, uint16_t size);
 
 static RTC_Status_t RTC_WaitForEEPROMReady(uint32_t timeout_ms);
+static RTC_Status_t RTC_ClearRegisterBits(uint8_t reg, uint8_t clear_mask);
+static uint8_t RTC_InterruptMaskToStatusMask(uint8_t interrupt_mask);
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -77,6 +80,33 @@ static RTC_Status_t RTC_WaitForEEPROMReady(uint32_t timeout_ms) {
     }
 }
 
+static RTC_Status_t RTC_ClearRegisterBits(uint8_t reg, uint8_t clear_mask) {
+    uint8_t value;
+    RTC_Status_t status = RTC_ReadRegister(reg, &value);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    value &= (uint8_t)~clear_mask;
+    return RTC_WriteRegister(reg, value);
+}
+
+static uint8_t RTC_InterruptMaskToStatusMask(uint8_t interrupt_mask) {
+    uint8_t status_mask = 0;
+
+    if ((interrupt_mask & RTC_INTERRUPT_VLOW1) != 0u) {
+        status_mask |= RTC_CTRL_STATUS_V1F;
+    }
+    if ((interrupt_mask & RTC_INTERRUPT_VLOW2) != 0u) {
+        status_mask |= RTC_CTRL_STATUS_V2F;
+    }
+    if ((interrupt_mask & RTC_INTERRUPT_SELF_RECOVERY) != 0u) {
+        status_mask |= RTC_CTRL_STATUS_SR;
+    }
+
+    return status_mask;
+}
+
 /* Public functions ----------------------------------------------------------*/
 
 /**
@@ -84,6 +114,9 @@ static RTC_Status_t RTC_WaitForEEPROMReady(uint32_t timeout_ms) {
   * @retval RTC status
   */
 RTC_Status_t RTC_Init(void) {
+    g_rtc_interrupt_pending = false;
+    HAL_GPIO_WritePin(RTC_CLKOE_PORT, RTC_CLKOE_PIN, GPIO_PIN_RESET);
+
     /* Ensure CS pin is Low */
     RTC_CS_DESELECT();
     
@@ -108,8 +141,9 @@ RTC_Status_t RTC_Init(void) {
     uint8_t eeprom_ctrl;
     RTC_Status_t status = RTC_ReadEEPROM(RTC_REG_EEPROM_CONTROL, &eeprom_ctrl);
     if (status == RTC_OK) {
-        /* Clear existing FD0 and FD1 bits */
-        eeprom_ctrl &= ~(RTC_EEPROM_CTRL_FD0 | RTC_EEPROM_CTRL_FD1);
+        /* Disable trickle charging; VBACKUP is not intentionally charged. */
+        eeprom_ctrl &= (uint8_t)~RTC_EEPROM_CTRL_TRICKLE_MASK;
+        eeprom_ctrl &= (uint8_t)~(RTC_EEPROM_CTRL_FD0 | RTC_EEPROM_CTRL_FD1);
         /* Set FD1=1, FD0=1 for 1Hz */
         eeprom_ctrl |= RTC_EEPROM_CTRL_FD0;
         eeprom_ctrl |= RTC_EEPROM_CTRL_FD1;
@@ -127,13 +161,12 @@ RTC_Status_t RTC_Init(void) {
             return status;
         }
 
-        /* Enable clock output */
-        status = RTC_EnableClockOutput(true);
+        /* Disable CLKOUT so pin 3 does not pull down the board pull-up. */
+        status = RTC_EnableClockOutput(false);
         if (status != RTC_OK) {
             return status;
         }
 
-        HAL_Delay(100); /* Wait for CLKOUT to stabilize with new frequency */
     } else {
         return status;
     }
@@ -151,6 +184,8 @@ RTC_Status_t RTC_DeInit(void) {
 
     /* Disable alarms */
     RTC_EnableAlarm(false);
+
+    g_rtc_interrupt_pending = false;
 
     /* Deselect CS pin */
     RTC_CS_DESELECT();
@@ -243,10 +278,10 @@ RTC_Status_t RTC_SetDateTime(RTC_DateTime_t* datetime) {
 
     /* Validate input parameters */
     if (datetime->seconds > 59 || datetime->minutes > 59 ||
-        datetime->hours > 23 || datetime->weekdays > 7 || datetime->weekdays == 0 ||
+        datetime->hours > 23 ||
         datetime->days > 31 || datetime->days == 0 ||
         datetime->months > 12 || datetime->months == 0 ||
-        datetime->years > 99) {
+        datetime->years > 79) {
         return RTC_INVALID_PARAM;
     }
 
@@ -275,7 +310,6 @@ RTC_Status_t RTC_SetDateTime(RTC_DateTime_t* datetime) {
 
     status |= RTC_WriteRegister(RTC_REG_HOURS, hours);
     status |= RTC_WriteRegister(RTC_REG_DAYS, RTC_Bin2BCD(datetime->days));
-    status |= RTC_WriteRegister(RTC_REG_WEEKDAYS, RTC_Bin2BCD(datetime->weekdays));
     status |= RTC_WriteRegister(RTC_REG_MONTHS, RTC_Bin2BCD(datetime->months));
     status |= RTC_WriteRegister(RTC_REG_YEARS, RTC_Bin2BCD(datetime->years));
 
@@ -314,9 +348,9 @@ if (datetime == NULL) {
     datetime->hours = RTC_BCD2Bin(hours_reg & 0x3F);    /* 24-hour format, mask with 0011 1111 */
 
     datetime->days = RTC_BCD2Bin(regs[3] & 0x3F);        /* Day of month, mask with 0011 1111 (tens: 0-3) and (ones: 0-9)*/
-    datetime->weekdays = RTC_BCD2Bin(regs[4] & 0x07);    /* Day of week,  mask with 0000 0111 (ones: 1-7) */
+    datetime->weekdays = 0;                               /* Weekdays are unused by firmware. */
     datetime->months = RTC_BCD2Bin(regs[5] & 0x1F);      /* Month, mask with 0001 1111 (tens: 0-1) and (ones: 0-9) */
-    datetime->years = RTC_BCD2Bin(regs[6] & 0x7F);       /* Year, mask with 0111 1111 (tens: 0-9) and (ones: 0-9) */
+    datetime->years = RTC_BCD2Bin(regs[6] & 0x7F);       /* Year, mask with 0111 1111 (tens: 0-7) and (ones: 0-9) */
     
     return RTC_OK;
 }
@@ -391,22 +425,11 @@ RTC_Status_t RTC_GetAlarm(RTC_Alarm_t* alarm) {
   * @retval RTC status
   */
 RTC_Status_t RTC_EnableAlarm(bool enable) {
-    uint8_t ctrl_int;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
-        return RTC_ERROR;
-    }
-    
-    /* Configure alarm interrupt enable bit */
     if (enable) {
-        /* Set the Alarm Interrupt Enable (AIE) bit */
-        ctrl_int |= RTC_CTRL_INT_AIE;
-    } else {
-        /* Clear the Alarm Interrupt Enable (AIE) bit */
-        ctrl_int &= (~RTC_CTRL_INT_AIE);
+        return RTC_EnableInterrupt(RTC_INTERRUPT_ALARM);
     }
-    
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+
+    return RTC_DisableInterrupt(RTC_INTERRUPT_ALARM);
 }
 
 /**
@@ -414,16 +437,12 @@ RTC_Status_t RTC_EnableAlarm(bool enable) {
   * @retval true if alarm flag is set, false otherwise
   */
 bool RTC_IsAlarmTriggered(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) == RTC_OK) {
-        if (ctrl_int_flag & RTC_CTRL_INT_FLAG_AF) {
-            return true;
-        } else {
-            return false;
-        }
+    uint8_t flags;
+
+    if (RTC_GetInterruptFlags(&flags) == RTC_OK) {
+        return (flags & RTC_INTERRUPT_ALARM) != 0u;
     }
-    
+
     return false;
 }
 
@@ -432,17 +451,91 @@ bool RTC_IsAlarmTriggered(void) {
   * @retval true if timer flag is set, false otherwise
   */
 bool RTC_IsTimerTriggered(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) == RTC_OK) {
-        if (ctrl_int_flag & RTC_CTRL_INT_FLAG_TF) {
-            return true;
-        } else {
-            return false;
+    uint8_t flags;
+
+    if (RTC_GetInterruptFlags(&flags) == RTC_OK) {
+        return (flags & RTC_INTERRUPT_TIMER) != 0u;
+    }
+
+    return false;
+}
+
+RTC_Status_t RTC_GetInterruptFlags(uint8_t *flags) {
+    RTC_Status_t status;
+
+    if (flags == NULL) {
+        return RTC_INVALID_PARAM;
+    }
+
+    status = RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, flags);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    *flags &= RTC_INTERRUPT_MASK_ALL;
+    return RTC_OK;
+}
+
+RTC_Status_t RTC_GetStatusFlags(uint8_t *status) {
+    if (status == NULL) {
+        return RTC_INVALID_PARAM;
+    }
+
+    return RTC_ReadRegister(RTC_REG_CONTROL_STATUS, status);
+}
+
+RTC_Status_t RTC_GetInterruptState(RTC_InterruptState_t *state) {
+    RTC_Status_t status;
+
+    if (state == NULL) {
+        return RTC_INVALID_PARAM;
+    }
+
+    status = RTC_ReadRegister(RTC_REG_CONTROL_INT, &state->enabled_mask);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_GetInterruptFlags(&state->flag_mask);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_GetStatusFlags(&state->status_flags);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    state->enabled_mask &= RTC_INTERRUPT_MASK_ALL;
+    return RTC_OK;
+}
+
+RTC_Status_t RTC_ClearInterruptSources(uint8_t interrupt_mask) {
+    RTC_Status_t status;
+    uint8_t status_mask;
+
+    if ((interrupt_mask & ~RTC_INTERRUPT_MASK_ALL) != 0u) {
+        return RTC_INVALID_PARAM;
+    }
+
+    if (interrupt_mask == 0u) {
+        return RTC_OK;
+    }
+
+    status = RTC_ClearRegisterBits(RTC_REG_CONTROL_INT_FLAG, interrupt_mask);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status_mask = RTC_InterruptMaskToStatusMask(interrupt_mask);
+    if (status_mask != 0u) {
+        status = RTC_ClearRegisterBits(RTC_REG_CONTROL_STATUS, status_mask);
+        if (status != RTC_OK) {
+            return status;
         }
     }
-    
-    return false;
+
+    return RTC_OK;
 }
 
 /**
@@ -450,15 +543,7 @@ bool RTC_IsTimerTriggered(void) {
   * @retval RTC status
   */
 RTC_Status_t RTC_ClearAlarmFlag(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) != RTC_OK) {
-        return RTC_ERROR;
-    }
-
-    ctrl_int_flag &= ~RTC_CTRL_INT_FLAG_AF;  /* Clear alarm flag */
-
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT_FLAG, ctrl_int_flag);
+    return RTC_ClearInterruptSources(RTC_INTERRUPT_ALARM);
 }
 
 /**
@@ -466,15 +551,7 @@ RTC_Status_t RTC_ClearAlarmFlag(void) {
   * @retval RTC status
   */
 RTC_Status_t RTC_ClearTimerFlag(void) {
-    uint8_t ctrl_int_flag;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT_FLAG, &ctrl_int_flag) != RTC_OK) {
-        return RTC_ERROR;
-    }
-
-    ctrl_int_flag &= ~RTC_CTRL_INT_FLAG_TF;  /* Clear timer flag */
-
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT_FLAG, ctrl_int_flag);
+    return RTC_ClearInterruptSources(RTC_INTERRUPT_TIMER);
 }
 
 /**
@@ -482,10 +559,64 @@ RTC_Status_t RTC_ClearTimerFlag(void) {
   * @retval RTC status
   */
 RTC_Status_t RTC_ClearAllFlags(void) {
-    /* Clear all interrupt flags */
-    RTC_Status_t status = RTC_WriteRegister(RTC_REG_CONTROL_INT_FLAG, 0x00);
-    
+    RTC_Status_t status = RTC_ClearInterruptSources(RTC_INTERRUPT_MASK_ALL);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_ClearRegisterBits(RTC_REG_CONTROL_STATUS, RTC_CTRL_STATUS_PON);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    g_rtc_interrupt_pending = false;
     return status;
+}
+
+RTC_Status_t RTC_EnableInterrupt(uint8_t interrupt_mask) {
+    uint8_t ctrl_int;
+
+    if ((interrupt_mask & ~RTC_INTERRUPT_MASK_ALL) != 0u) {
+        return RTC_INVALID_PARAM;
+    }
+
+    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
+        return RTC_ERROR;
+    }
+
+    ctrl_int |= interrupt_mask;
+    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+}
+
+RTC_Status_t RTC_DisableInterrupt(uint8_t interrupt_mask) {
+    uint8_t ctrl_int;
+
+    if ((interrupt_mask & ~RTC_INTERRUPT_MASK_ALL) != 0u) {
+        return RTC_INVALID_PARAM;
+    }
+
+    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
+        return RTC_ERROR;
+    }
+
+    ctrl_int &= (uint8_t)~interrupt_mask;
+    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+}
+
+void RTC_NotifyInterrupt(void) {
+    g_rtc_interrupt_pending = true;
+}
+
+bool RTC_IsInterruptPending(void) {
+    return g_rtc_interrupt_pending;
+}
+
+void RTC_ClearPendingInterrupt(void) {
+    g_rtc_interrupt_pending = false;
+}
+
+bool RTC_IsInterruptAsserted(void) {
+    return HAL_GPIO_ReadPin(RTC_INT_PORT, RTC_INT_PIN) == GPIO_PIN_RESET;
 }
 
 /**
@@ -501,16 +632,16 @@ RTC_Status_t RTC_EnableClockOutput(bool enable) {
         HAL_GPIO_WritePin(RTC_CLKOE_PORT, RTC_CLKOE_PIN, GPIO_PIN_RESET);
     }
     
-    /* Control CLK/INT bit in Control_1 register */
+    /* CLKOE-low makes CLKOUT drive low, so disable selects high-Z INT mode. */
     uint8_t ctrl1;
     if (RTC_ReadRegister(RTC_REG_CONTROL_1, &ctrl1) != RTC_OK) {
         return RTC_ERROR;
     }
-    
+
     if (enable) {
         ctrl1 |= RTC_CTRL1_CLK_INT;
     } else {
-        ctrl1 &= ~RTC_CTRL1_CLK_INT;
+        ctrl1 &= (uint8_t)~RTC_CTRL1_CLK_INT;
     }
     
     return RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
@@ -534,13 +665,20 @@ RTC_Status_t RTC_SetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
         return RTC_INVALID_PARAM;
     }
 
+    if (alarm->seconds > 59 || alarm->minutes > 59 ||
+        alarm->hours > 23 || alarm->days > 31 || alarm->days == 0 ||
+        alarm->months > 12 || alarm->months == 0 ||
+        alarm->years > 79) {
+        return RTC_INVALID_PARAM;
+    }
+
     /* Convert values to BCD and fill registers */
     uint8_t sec_reg = RTC_Bin2BCD(alarm->seconds);
     uint8_t min_reg = RTC_Bin2BCD(alarm->minutes);
     uint8_t hour_reg = RTC_Bin2BCD(alarm->hours);
     uint8_t day_reg = RTC_Bin2BCD(alarm->days);
     uint8_t month_reg = RTC_Bin2BCD(alarm->months);
-    uint8_t weekday_reg = RTC_Bin2BCD(alarm->weekdays);
+    uint8_t weekday_reg = 0;
     uint8_t year_reg = RTC_Bin2BCD(alarm->years);
 
     RTC_Status_t status = RTC_OK;
@@ -550,9 +688,6 @@ RTC_Status_t RTC_SetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     if (alarm->minutes_enable) { min_reg |= RTC_ALARM_ENABLE; }
     if (alarm->hours_enable) { hour_reg |= RTC_ALARM_ENABLE; }
     if (alarm->days_enable) { day_reg |= RTC_ALARM_ENABLE; }
-    if (alarm->weekdays_enable) { weekday_reg |= RTC_ALARM_ENABLE; }
-    if (alarm->months_enable) { month_reg |= RTC_ALARM_ENABLE; }
-    if (alarm->years_enable) { year_reg |= RTC_ALARM_ENABLE; }
     if (alarm->months_enable) { month_reg |= RTC_ALARM_ENABLE; }
     if (alarm->years_enable) { year_reg |= RTC_ALARM_ENABLE; }
 
@@ -590,7 +725,7 @@ RTC_Status_t RTC_GetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     alarm->minutes = RTC_BCD2Bin(regs[1] & 0x7F);
     alarm->hours = RTC_BCD2Bin(regs[2] & 0x3F);
     alarm->days = RTC_BCD2Bin(regs[3] & 0x3F);
-    alarm->weekdays = RTC_BCD2Bin(regs[4] & 0x07);
+    alarm->weekdays = 0;
     alarm->months = RTC_BCD2Bin(regs[5] & 0x1F);
     alarm->years = RTC_BCD2Bin(regs[6] & 0x7F);
 
@@ -599,7 +734,7 @@ RTC_Status_t RTC_GetExtendedAlarm(RTC_ExtendedAlarm_t* alarm) {
     alarm->minutes_enable = (regs[1] & RTC_ALARM_ENABLE) ? true : false;
     alarm->hours_enable = (regs[2] & RTC_ALARM_ENABLE) ? true : false;
     alarm->days_enable = (regs[3] & RTC_ALARM_ENABLE) ? true : false;
-    alarm->weekdays_enable = (regs[4] & RTC_ALARM_ENABLE) ? true : false;
+    alarm->weekdays_enable = false;
     alarm->months_enable = (regs[5] & RTC_ALARM_ENABLE) ? true : false;
     alarm->years_enable = (regs[6] & RTC_ALARM_ENABLE) ? true : false;
     
@@ -616,22 +751,32 @@ RTC_Status_t RTC_SetTimer(RTC_Timer_t* timer) {
         return RTC_INVALID_PARAM;
     }
 
-    RTC_Status_t status = RTC_OK;
-
-    /* Set timer value (16-bit split into low and high bytes) */
-    status |= RTC_WriteRegister(RTC_REG_TIMER_LOW, timer->timer_value & 0xFF);
-    status |= RTC_WriteRegister(RTC_REG_TIMER_HIGH, (timer->timer_value >> 8) & 0xFF);
-
-    /* Read current control register to preserve CLK_INT bit */
     uint8_t ctrl1;
-    status = RTC_ReadRegister(RTC_REG_CONTROL_1, &ctrl1);
+    RTC_Status_t status = RTC_ReadRegister(RTC_REG_CONTROL_1, &ctrl1);
     if (status != RTC_OK) {
         return status;
     }
 
-    /* Clear timer-related bits, preserve CLK_INT */
-    ctrl1 &= ~(RTC_CTRL1_TE | RTC_CTRL1_TAR | 0x60);  /* Clear TE, TAR, TD1, TD0 */
+    /* Timer source and countdown value writes require TE=0 and TAR=0. */
+    ctrl1 &= (uint8_t)~(RTC_CTRL1_TE | RTC_CTRL1_TAR);
     ctrl1 |= RTC_CTRL1_WE;  /* Always enable write */
+    status = RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_WriteRegister(RTC_REG_TIMER_LOW, timer->timer_value & 0xFF);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    status = RTC_WriteRegister(RTC_REG_TIMER_HIGH, (timer->timer_value >> 8) & 0xFF);
+    if (status != RTC_OK) {
+        return status;
+    }
+
+    ctrl1 &= (uint8_t)~(RTC_CTRL1_TAR | RTC_CTRL1_TD0 | RTC_CTRL1_TD1);
+    ctrl1 |= (timer->division & (RTC_CTRL1_TD0 | RTC_CTRL1_TD1));
 
     if (timer->enabled) {
         ctrl1 |= RTC_CTRL1_TE;
@@ -640,12 +785,7 @@ RTC_Status_t RTC_SetTimer(RTC_Timer_t* timer) {
         ctrl1 |= RTC_CTRL1_TAR;
     }
 
-    /* Set timer division */
-    ctrl1 |= (timer->division & 0x60);  /* grab TD1 and TD0 bits with mask: 0110 0000 */
-
-    status |= RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
-
-    return status;
+    return RTC_WriteRegister(RTC_REG_CONTROL_1, ctrl1);
 }
 
 /**
@@ -672,7 +812,7 @@ RTC_Status_t RTC_GetTimer(RTC_Timer_t* timer) {
     timer->timer_value = (timer_high << 8) | timer_low;
     timer->enabled = (ctrl1 & RTC_CTRL1_TE) ? true : false;
     timer->auto_reload = (ctrl1 & RTC_CTRL1_TAR) ? true : false;
-    timer->division = ctrl1 & 0x60;  /* grab TD1 and TD0 bits with mask: 0110 0000 */
+    timer->division = ctrl1 & (RTC_CTRL1_TD0 | RTC_CTRL1_TD1);
 
     return RTC_OK;
 }
@@ -699,8 +839,10 @@ RTC_Status_t RTC_EnableTimer(bool enable) {
 }
 
 /**
-  * @brief  Set timer division (frequency) for CLKOUT
-  * @param  division: Timer division setting (RTC_TIMER_DIV_xxxx)
+  * @brief  Set countdown timer source clock.
+  * @param  division: Countdown timer source clock (RTC_TIMER_DIV_*)
+  * @note   Per the RTC manual, TD1:TD0 should only be changed while the
+  *         countdown timer is disabled.
   * @retval RTC status
   */
 RTC_Status_t RTC_SetTimerDivision(uint8_t division) {
@@ -711,13 +853,13 @@ RTC_Status_t RTC_SetTimerDivision(uint8_t division) {
         return RTC_ERROR;
     }
     
-    /* Clear existing TD1 and TD0 bits (bits 6:5) */
-    ctrl1 &= ~0x60;  /* Clear bits 6:5 (TD1:TD0) */
+    /* Clear existing TD1 and TD0 bits. */
+    ctrl1 &= (uint8_t)~(RTC_CTRL1_TD0 | RTC_CTRL1_TD1);
     
-    /* Set new timer division */
-    ctrl1 |= (division & 0x60);  /* Set TD1 and TD0 bits */
+    /* Set new timer source clock. */
+    ctrl1 |= (division & (RTC_CTRL1_TD0 | RTC_CTRL1_TD1));
     
-    /* Ensure write enable is set for any register writes DEBUG */
+    /* Ensure write enable is set for the register write. */
     ctrl1 |= RTC_CTRL1_WE;
     
     /* Write back the modified control register */
@@ -730,19 +872,11 @@ RTC_Status_t RTC_SetTimerDivision(uint8_t division) {
   * @retval RTC status
   */
 RTC_Status_t RTC_EnableTimerInterrupt(bool enable) {
-    uint8_t ctrl_int;
-    
-    if (RTC_ReadRegister(RTC_REG_CONTROL_INT, &ctrl_int) != RTC_OK) {
-        return RTC_ERROR;
-    }
-    
     if (enable) {
-        ctrl_int |= RTC_CTRL_INT_TIE;
-    } else {
-        ctrl_int &= ~RTC_CTRL_INT_TIE;
+        return RTC_EnableInterrupt(RTC_INTERRUPT_TIMER);
     }
-    
-    return RTC_WriteRegister(RTC_REG_CONTROL_INT, ctrl_int);
+
+    return RTC_DisableInterrupt(RTC_INTERRUPT_TIMER);
 }
 
 /**
@@ -950,7 +1084,7 @@ uint8_t RTC_GetDaysInMonth(uint8_t month, uint16_t year) {
 
 /**
   * @brief  Convert RTC date/time to GPS epoch seconds
-  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-99, meaning 2000-2099)
+  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-79, meaning 2000-2079)
   * @retval Seconds since GPS epoch (Jan 6, 1980 00:00:00 UTC)
   */
 uint32_t RTC_ToGPSEpoch(const RTC_DateTime_t *dt)
@@ -988,7 +1122,7 @@ uint32_t RTC_ToGPSEpoch(const RTC_DateTime_t *dt)
 
 /**
   * @brief  Convert RTC date/time to Unix epoch seconds
-  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-99, meaning 2000-2099)
+  * @param  dt: Pointer to RTC_DateTime_t (years field is 0-79, meaning 2000-2079)
   * @retval Seconds since Unix epoch (Jan 1, 1970 00:00:00 UTC)
   */
 uint32_t RTC_ToUnixEpoch(const RTC_DateTime_t *dt)
@@ -1024,7 +1158,7 @@ uint32_t RTC_ToUnixEpoch(const RTC_DateTime_t *dt)
 /**
   * @brief  Convert Unix epoch seconds to RTC date/time
   * @param  unix_epoch: Seconds since Jan 1, 1970 00:00:00 UTC
-  * @param  dt: Pointer to RTC_DateTime_t to fill (years field = 0-99 for 2000-2099)
+  * @param  dt: Pointer to RTC_DateTime_t to fill (years field = 0-79 for 2000-2079)
   */
 void RTC_FromUnixEpoch(uint32_t unix_epoch, RTC_DateTime_t *dt)
 {
@@ -1037,8 +1171,7 @@ void RTC_FromUnixEpoch(uint32_t unix_epoch, RTC_DateTime_t *dt)
     dt->minutes = (uint8_t)((secs % 3600) / 60);
     dt->seconds = (uint8_t)(secs % 60);
 
-    /* Jan 1 1970 was a Thursday (weekday 5 in 1=Sun convention) */
-    dt->weekdays = (uint8_t)((days + 4) % 7 + 1);
+    dt->weekdays = 0; /* Weekdays are unused by firmware. */
 
     /* Walk years from 1970 */
     uint16_t year = 1970;

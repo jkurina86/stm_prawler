@@ -17,17 +17,12 @@ extern "C" {
 /* Argument structures ---------------------------------------------------*/
 
 typedef struct {
-    uint32_t reset_due_ms;
-} reset_args_t;
-
-typedef struct {
     uint16_t year;
     uint8_t months;
     uint8_t days;
     uint8_t hours;
     uint8_t minutes;
     uint8_t seconds;
-    uint8_t weekdays;
     uint8_t valid;
 } rtc_settime_args_t;
 
@@ -50,7 +45,10 @@ typedef struct {
 void handle_help(const void *arg);
 void handle_clear(const void *arg);
 void handle_status(const void *arg);
-void handle_reset(const void *arg);
+void handle_lowpower(const void *arg);
+void handle_stayawake(const void *arg);
+void handle_debug_mode(const void *arg);
+void handle_lowpower_timer(const void *arg);
 void handle_version(const void *arg);
 /* RTC */
 void handle_settime(const void *arg);
@@ -67,7 +65,6 @@ void handle_ctd(const void *arg);
 /* Optode */
 void handle_optode(const void *arg);
 void handle_optode_listen(const void *arg);
-void handle_optode_setup(const void *arg);
 
 /* WetLab */
 void handle_wetlab(const void *arg);
@@ -78,25 +75,21 @@ void handle_sensors(const void *arg);
 
 /* Config */
 void handle_config(const void *arg);
+void handle_samplerate(const void *arg);
 
 /* WiFi */
 void handle_wifi_status(const void *arg);
-void handle_wifi_init(const void *arg);
+void handle_wifi_up(const void *arg);
+void handle_wifi_down(const void *arg);
 
 /* Realtime */
-void handle_realtime(const void *arg);
+void handle_idata(const void *arg);
+void handle_who(const void *arg);
 
 /* File System */
 void handle_fs_mount(const void *arg);
 void handle_fs_unmount(const void *arg);
-void handle_fs_df(const void *arg);
 void handle_fs_ls(const void *arg);
-void handle_fs_cat(const void *arg);
-void handle_fs_write(const void *arg);
-void handle_fs_rm(const void *arg);
-void handle_fs_mkdir(const void *arg);
-void handle_fs_rmdir(const void *arg);
-void handle_fs_cp(const void *arg);
 
 #ifdef __cplusplus
 }

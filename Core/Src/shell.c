@@ -12,7 +12,7 @@
 #include "tasker.h"
 #include "task_handlers.h"
 #include "config.h"
-#include "filesystem.h"
+#include "lowpower.h"
 #include <stdarg.h>
 
 extern UART_HandleTypeDef huart1;
@@ -21,6 +21,8 @@ extern UART_HandleTypeDef huart1;
 static char shell_buffer[SHELL_MAX_CMD_LEN];
 static uint16_t shell_buffer_pos = 0;
 static uint8_t shell_rx_char;
+static bool shell_prompt_deferred;
+static bool shell_dispatch_from_wifi;
 
 /* Non-blocking ISR to main RX ring buffer */
 #define SHELL_RX_RING_SIZE 128
@@ -51,8 +53,11 @@ const shell_command_t shell_commands[] = {
     {"help", "Display available commands", cmd_help},
     {"clear", "Clear terminal screen", cmd_clear},
     {"status", "Show system status", cmd_status},
+    {"lowpower", "Force low-power sleep mode", cmd_lowpower},
+    {"stayawake", "Disable automatic low-power timer", cmd_stayawake},
+    {"debug-mode", "Disable sleep and power sensor interfaces", cmd_debug_mode},
+    {"lowpower-timer", "Restart automatic low-power timer", cmd_lowpower_timer},
     {"pb8", "Show PB8 pin state", cmd_pb8},
-    {"reset", "Reset the system", cmd_reset},
     {"version", "Show firmware version", cmd_version},
 
     /* RTC Commands */
@@ -70,7 +75,6 @@ const shell_command_t shell_commands[] = {
     /* Optode Commands */
     {"optode", "Get Optode sensor data", cmd_optode},
     {"optode-listen", "Power-cycle optode and listen", cmd_optode_listen},
-    {"optode-setup", "Set optode to 9600 baud + terminal mode", cmd_optode_setup},
 
     /* WetLab Commands */
     {"wetlab", "Get WetLab sensor data", cmd_wetlab},
@@ -81,25 +85,21 @@ const shell_command_t shell_commands[] = {
 
     /* Config */
     {"config", "Get/set sensor config (1-3)", cmd_config},
+    {"samplerate", "Get/set sample interval seconds (4-60)", cmd_samplerate},
 
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
     {"fs-unmount", "Unmount the file system", cmd_fs_unmount},
-    {"fs-df", "Show file system free space", cmd_fs_df},
     {"fs-ls", "List directory contents", cmd_fs_ls},
-    {"fs-cat", "Read a file", cmd_fs_cat},
-    {"fs-write", "Write a file", cmd_fs_write},
-    {"fs-rm", "Delete a file", cmd_fs_rm},
-    {"fs-mkdir", "Create a directory", cmd_fs_mkdir},
-    {"fs-rmdir", "Remove a directory", cmd_fs_rmdir},
-    {"fs-cp", "Copy a file", cmd_fs_cp},
 
     /* WiFi Commands */
     {"wifi-status", "Show WiFi module state", cmd_wifi_status},
-    {"wifi-init", "Re-initialize WiFi module", cmd_wifi_init},
+    {"wifi-up", "Power on and initialize WiFi module", cmd_wifi_up},
+    {"wifi-down", "Power off WiFi module", cmd_wifi_down},
 
     /* Realtime Commands */
-    {"realtime", "Stream last recording over WiFi", cmd_realtime},
+    {"idata", "Stream last recording over WiFi", cmd_idata},
+    {"who", "Report device serial number", cmd_who},
 
     {NULL, NULL, NULL} /* End marker */
 };
@@ -117,18 +117,43 @@ static int shell_parse_command(char *cmd_line, char **argv);
  */
 bool shell_dispatch(char *cmd_line)
 {
+    bool previous_dispatch_from_wifi = shell_dispatch_from_wifi;
+    bool found = false;
     char *argv[SHELL_MAX_ARGS];
+
+    shell_dispatch_from_wifi = true;
+
     int argc = shell_parse_command(cmd_line, argv);
-    if (argc == 0)
-        return true;  /* empty line is not an error */
+    if (argc == 0) {
+        found = true;  /* empty line is not an error */
+        goto done;
+    }
 
     for (int i = 0; shell_commands[i].name != NULL; i++) {
         if (strcmp(argv[0], shell_commands[i].name) == 0) {
             shell_commands[i].function(argc, argv);
-            return true;
+            found = true;
+            goto done;
         }
     }
-    return false;
+
+done:
+    shell_dispatch_from_wifi = previous_dispatch_from_wifi;
+    return found;
+}
+
+void shell_defer_prompt(void)
+{
+    if (!shell_dispatch_from_wifi)
+        shell_prompt_deferred = true;
+}
+
+void shell_resume_rx(void)
+{
+    __HAL_UART_CLEAR_OREFLAG(&huart1);
+    __HAL_UART_CLEAR_NEFLAG(&huart1);
+    __HAL_UART_CLEAR_FEFLAG(&huart1);
+    HAL_UART_Receive_IT(&huart1, &shell_rx_char, 1);
 }
 
 /* Public functions ----------------------------------------------------------*/
@@ -146,7 +171,7 @@ void shell_init(void)
     shell_buffer_pos = 0;
 
     /* Start UART reception in interrupt-mode (HAL) */
-    HAL_UART_Receive_IT(&huart1, &shell_rx_char, 1);
+    shell_resume_rx();
 
     /* Print welcome message */
     shell_print("\n===============================================\n");
@@ -176,7 +201,10 @@ void shell_process_char(uint8_t ch)
                 shell_buffer_pos = 0;
                 memset(shell_buffer, 0, sizeof(shell_buffer)); /* Zeros the char buffer in memory. */
             }
-            shell_print(SHELL_PROMPT);
+            if (shell_prompt_deferred)
+                shell_prompt_deferred = false;
+            else
+                shell_print(SHELL_PROMPT);
             break;
 
         /* Backspace/Delete */
@@ -335,20 +363,52 @@ void cmd_status(int argc, char **argv)
     tasker_enqueue(handle_status, NULL, 0);
 }
 
+void cmd_lowpower(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_lowpower, NULL, 0)) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
+}
+
+void cmd_stayawake(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_stayawake, NULL, 0)) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
+}
+
+void cmd_debug_mode(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_debug_mode, NULL, 0)) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
+}
+
+void cmd_lowpower_timer(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_lowpower_timer, NULL, 0)) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
+}
+
 void cmd_pb8(int argc, char **argv)
 {
     (void)argc; (void)argv;
     GPIO_PinState pin = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8);
     shell_printf("PB8 = %s\r\n", pin == GPIO_PIN_SET ? "HIGH" : "LOW");
-}
-
-void cmd_reset(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-
-    /* Schedule reset task with 3 second delay */
-    reset_args_t args = { .reset_due_ms = HAL_GetTick() + 3000u };
-    tasker_enqueue(handle_reset, &args, sizeof(args));
 }
 
 /**
@@ -374,7 +434,7 @@ void cmd_settime(int argc, char **argv)
 /**
   * @brief Set RTC date and time
   * @param argc: Argument count
-  * @param argv: Arguments (YYYY MM DD HH MM SS WD)
+  * @param argv: Arguments (YYYY MM DD HH MM SS)
   * @retval None
   */
 void cmd_rtc_settime(int argc, char **argv)
@@ -382,14 +442,13 @@ void cmd_rtc_settime(int argc, char **argv)
     /* Parse arguments and schedule RTC settime task */
     rtc_settime_args_t args = {0};
     
-    if (argc >= 8 && argv != NULL) {
+    if (argc >= 7 && argv != NULL) {
         args.year = (uint16_t)atoi(argv[1]);
         args.months = (uint8_t)atoi(argv[2]);
         args.days = (uint8_t)atoi(argv[3]);
         args.hours = (uint8_t)atoi(argv[4]);
         args.minutes = (uint8_t)atoi(argv[5]);
         args.seconds = (uint8_t)atoi(argv[6]);
-        args.weekdays = (uint8_t)atoi(argv[7]);
         args.valid = 1;
     }
     
@@ -490,20 +549,6 @@ void cmd_fs_unmount(int argc, char **argv)
 }
 
 /**
-  * @brief Schedule a df task
-  * @param argc: Argument count
-  * @param argv: Arguments
-  * @retval None
-  * @note Requires the file system to be mounted. Sets a flag to handle in main loop context.
-  */
-void cmd_fs_df(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-
-    tasker_enqueue(handle_fs_df, NULL, 0);
-}
-
-/**
   * @brief Schedule an ls task
   * @param argc: Argument count
   * @param argv: Arguments (optional path)
@@ -513,144 +558,6 @@ void cmd_fs_ls(int argc, char **argv)
 {
     (void)argc; (void)argv; /* Unused args */
     tasker_enqueue(handle_fs_ls, NULL, 0);
-}
-
-/**
-  * @brief Schedule a cat task
-  * @param argc: Argument count
-  * @param argv: Arguments (file path)
-  * @retval None
-  */
-void cmd_fs_cat(int argc, char **argv)
-{
-    (void)argc; /* Unused arg */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0'; /* Ensure null-termination */
-    }
-
-    tasker_enqueue(handle_fs_cat, NULL, 0);
-}
-
-/**
-  * @brief Schedule a write task
-  * @param argc: Argument count
-  * @param argv: Arguments (file path, content)
-  * @retval None
-  */
-void cmd_fs_write(int argc, char **argv)
-{
-    (void)argc; /* Unused arg */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0';
-    }
-
-    /* Copy file data into buffer */
-    if (argv[2] != NULL) {
-        strncpy(buffers->file_data, argv[2], sizeof(buffers->file_data) - 1);
-        buffers->file_data[sizeof(buffers->file_data) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_write, NULL, 0);
-}
-
-/**
-  * @brief Schedule an rm task
-  * @param argc: Argument count
-  * @param argv: Arguments (file path)
-  * @retval None
-  */
-void cmd_fs_rm(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_rm, NULL, 0);
-}
-
-/**
-  * @brief Schedule a mkdir task
-  * @param argc: Argument count
-  * @param argv: Arguments (directory path)
-  * @retval None
-  * @note Called from ISR context
-  */
-void cmd_fs_mkdir(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy directory name into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->dirname, argv[1], sizeof(buffers->dirname) - 1);
-        buffers->dirname[sizeof(buffers->dirname) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_mkdir, NULL, 0);
-}
-
-/**
-  * @brief Schedule an rmdir task
-  * @param argc: Argument count
-  * @param argv: Arguments (directory path)
-  * @retval None
-  */
-void cmd_fs_rmdir(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-
-    /* Copy directory name into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->dirname, argv[1], sizeof(buffers->dirname) - 1);
-        buffers->dirname[sizeof(buffers->dirname) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_rmdir, NULL, 0);
-}
-
-/** @brief Schedule a cp task
-  * @param argc: Argument count
-  * @param argv: Arguments (source path, destination path)
-  * @retval None
-  */
-void cmd_fs_cp(int argc, char **argv)
-{
-    (void)argc; (void)argv; /* Unused args */
-    /* Create a pointer to the file system buffers */
-    FS_Buffers_t *buffers = filesystem_get_buffers();
-    
-    /* Copy source filename into buffer */
-    if (argv[1] != NULL) {
-        strncpy(buffers->filename, argv[1], sizeof(buffers->filename) - 1);
-        buffers->filename[sizeof(buffers->filename) - 1] = '\0';
-    }
-
-    /* Copy destination filename into buffer */
-    if (argv[2] != NULL) {
-        strncpy(buffers->dest_filename, argv[2], sizeof(buffers->dest_filename) - 1);
-        buffers->dest_filename[sizeof(buffers->dest_filename) - 1] = '\0';
-    }
-
-    tasker_enqueue(handle_fs_cp, NULL, 0);
 }
 
 /* CTD Commands ---------------------------------------------------*/
@@ -673,12 +580,6 @@ void cmd_optode_listen(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_optode_listen, NULL, 0);
-}
-
-void cmd_optode_setup(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_optode_setup, NULL, 0);
 }
 
 /* WetLab Commands ------------------------------------------------*/
@@ -717,6 +618,28 @@ void cmd_config(int argc, char **argv)
     tasker_enqueue(handle_config, &args, sizeof(args));
 }
 
+void cmd_samplerate(int argc, char **argv)
+{
+    uint32_t samplerate_ms = 0;
+
+    if (argc >= 2) {
+        int seconds = atoi(argv[1]);
+        if (seconds < (int)SAMPLE_RATE_MIN_SECONDS) {
+            seconds = (int)SAMPLE_RATE_MIN_SECONDS;
+        } else if (seconds > (int)SAMPLE_RATE_MAX_SECONDS) {
+            seconds = (int)SAMPLE_RATE_MAX_SECONDS;
+        }
+
+        samplerate_ms = (uint32_t)seconds * 1000UL;
+    }
+
+    shell_defer_prompt();
+    if (!tasker_enqueue(handle_samplerate, &samplerate_ms, sizeof(samplerate_ms))) {
+        shell_print("Task queue full\r\n");
+        shell_print(SHELL_PROMPT);
+    }
+}
+
 /* WiFi Commands ---------------------------------------------------*/
 
 void cmd_wifi_status(int argc, char **argv)
@@ -725,16 +648,30 @@ void cmd_wifi_status(int argc, char **argv)
     tasker_enqueue(handle_wifi_status, NULL, 0);
 }
 
-void cmd_wifi_init(int argc, char **argv)
+void cmd_wifi_up(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_init, NULL, 0);
+    tasker_enqueue(handle_wifi_up, NULL, 0);
 }
 
-void cmd_realtime(int argc, char **argv)
+void cmd_wifi_down(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    tasker_enqueue(handle_realtime, NULL, 0);
+    tasker_enqueue(handle_wifi_down, NULL, 0);
+}
+
+void cmd_idata(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    shell_defer_prompt();
+    tasker_enqueue(handle_idata, NULL, 0);
+}
+
+void cmd_who(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    shell_defer_prompt();
+    tasker_enqueue(handle_who, NULL, 0);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/
@@ -747,6 +684,7 @@ void cmd_realtime(int argc, char **argv)
 void shell_uart_receive_callback(void)
 {
     /* Enqueue received byte and do all parsing/printing in main with shell_task() */
+    lowpower_note_activity();
     shell_rx_enqueue(shell_rx_char);
     HAL_UART_Receive_IT(&huart1, &shell_rx_char, 1);
 }

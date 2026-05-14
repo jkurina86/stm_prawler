@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    wifi.h
   * @brief   ISM4343-WBM-L54 WiFi module driver (AP mode, TCP passthrough)
-  * @note    UART4 at 115200 baud, interrupt-driven RX ring buffer.
-  *          After boot, enters PX streaming mode -- UART becomes a
+  * @note    UART4 at 9600 baud, interrupt-driven RX ring buffer.
+  *          After boot, enters PX streaming mode UART becomes a
   *          transparent byte pipe to/from the connected TCP client.
   ******************************************************************************
   */
@@ -20,7 +20,7 @@ extern "C" {
 #include <stdbool.h>
 
 /* Configuration -------------------------------------------------------------*/
-#define WIFI_AP_SSID        "prawler"
+#define WIFI_AP_SSID        "prawler1"
 #define WIFI_AP_SECURITY    "0"             /* 0 = Open */
 #define WIFI_AP_CHANNEL     "6"
 #define WIFI_AP_IP          "192.168.10.1"
@@ -36,14 +36,16 @@ typedef enum {
 
 /* Function prototypes -------------------------------------------------------*/
 void wifi_init(UART_HandleTypeDef *huart);
+void wifi_down(void);
 void wifi_service(void);
 wifi_state_t wifi_get_state(void);
 
 /* Passthrough data API */
 uint16_t wifi_write(const uint8_t *data, uint16_t len);
 void wifi_printf(const char *format, ...);
-uint16_t wifi_read(uint8_t *buf, uint16_t buf_size);
+void wifi_prompt(void);
 uint16_t wifi_available(void);
+uint32_t wifi_get_rx_count(void);
 
 /* Callback notify function (called from centralized HAL callback) */
 void wifi_notify_rx_cplt(void);

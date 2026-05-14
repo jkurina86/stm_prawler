@@ -101,15 +101,6 @@ bool tasker_enqueue(task_fn_t fn, const void *arg, size_t arg_len)
 }
 
 /**
- * @brief Check if task queue is empty
- * @retval true if no pending tasks, false otherwise
- */
-bool tasker_is_empty(void)
-{
-    return queue_head == queue_tail;
-}
-
-/**
  * @brief Get number of pending tasks in queue
  * @retval Number of tasks waiting to be executed
  */

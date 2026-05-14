@@ -17,6 +17,8 @@
 #include "config.h"
 #include "wifi.h"
 #include "realtime_comm.h"
+#include "lowpower.h"
+#include "sd_spi.h"
 #include <string.h>
 
 /* External UART handles declared in main.c */
@@ -30,6 +32,53 @@ extern UART_HandleTypeDef huart5;
 #define FW_VERSION "0.1.0"
 
 /* General Handlers -------------------------------------------------------*/
+
+static const char *sys_mode_name(sys_mode_t mode)
+{
+    switch (mode) {
+    case SYS_MODE_IDLE:
+        return "IDLE";
+    case SYS_MODE_RECORDING:
+        return "RECORDING";
+    case SYS_MODE_FALSE_START:
+        return "FALSE_START";
+    case SYS_MODE_TIMEOUT:
+        return "TIMEOUT";
+    case SYS_MODE_NORMALIZING:
+        return "NORMALIZING";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static bool sensor_shell_peripherals_available(void)
+{
+    if (lowpower_profile_peripherals_are_up()) {
+        return true;
+    }
+
+    shell_print("[power] Sensor peripherals are off in idle; PB8 profile start owns sensor power\r\n");
+    return false;
+}
+
+static void print_sd_diag(void)
+{
+    const SD_SPI_Diag_t *diag = USER_SPI_diag();
+
+    shell_printf("[sd] stage=%s stat=0x%02x type=0x%02x cmd=%u resp=0x%02x "
+                 "token=0x%02x sector=%lu count=%u hal=%u spierr=0x%08lx dres=%d\r\n",
+                 USER_SPI_diag_stage_name(diag->stage),
+                 diag->stat,
+                 diag->card_type,
+                 diag->last_cmd,
+                 diag->last_resp,
+                 diag->last_token,
+                 (unsigned long)diag->last_sector,
+                 diag->last_count,
+                 diag->last_hal_status,
+                 (unsigned long)diag->spi_error,
+                 diag->last_result);
+}
 
 /** @brief  Handle the "help" command
   * @param  arg: Pointer to arguments (not used)
@@ -62,11 +111,10 @@ void handle_clear(const void *arg)
 void handle_status(const void *arg)
 {
     (void)arg;
-    static const char *mode_names[]   = {"IDLE", "RECORDING", "NORMALIZING"};
     static const char *periph_names[] = {"OFF", "READY", "ERROR"};
     static const char *wifi_names[]   = {"OFF", "INIT", "STREAMING", "ERROR"};
 
-    shell_printf("Mode:       %s\r\n", mode_names[g_app.mode]);
+    shell_printf("Mode:       %s\r\n", sys_mode_name(g_app.mode));
     shell_printf("Uptime:     %lu ms\r\n", HAL_GetTick());
     shell_printf("Tasks:      %u pending\r\n", tasker_pending_count());
     shell_printf("SD/FS:      %s\r\n", periph_names[g_app.sd_status]);
@@ -76,23 +124,60 @@ void handle_status(const void *arg)
     shell_printf("WetLab:     %s\r\n", periph_names[g_app.wetlab_status]);
     shell_printf("WiFi:       %s\r\n", wifi_names[g_app.wifi_state]);
     shell_printf("Sensors:    level %u\r\n", g_app.sensor_level);
+    shell_printf("Samplerate: %lu ms\r\n", (unsigned long)config_get_samplerate_ms());
 }
 
-/** @brief  Handle the "reset" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_reset(const void *arg)
+void handle_lowpower(const void *arg)
 {
-    const reset_args_t *a = (const reset_args_t *)arg;
-    shell_print("System resetting in 3 seconds...\r\n");
+    (void)arg;
 
-    /* Spin until the target tick is reached */
-    while (HAL_GetTick() < a->reset_due_ms) {
-        /* wait */
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[lowpower] Sleep is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
+        shell_print(SHELL_PROMPT);
+        return;
     }
 
-    NVIC_SystemReset();
+    if (!lowpower_request_on()) {
+        shell_print("[lowpower] Sleep request already pending\r\n");
+        shell_print(SHELL_PROMPT);
+        return;
+    }
+
+    shell_print("[lowpower] Forced sleep requested\r\n");
+}
+
+void handle_stayawake(const void *arg)
+{
+    (void)arg;
+    lowpower_stay_awake();
+    shell_print("[lowpower] Automatic sleep timer disabled\r\n");
+    shell_print(SHELL_PROMPT);
+}
+
+void handle_debug_mode(const void *arg)
+{
+    (void)arg;
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[debug] Debug mode is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
+        shell_print(SHELL_PROMPT);
+        return;
+    }
+
+    lowpower_stay_awake();
+    lowpower_profile_peripherals_up();
+    shell_print("[debug] Automatic sleep timer disabled; sensor interfaces powered\r\n");
+    shell_print(SHELL_PROMPT);
+}
+
+void handle_lowpower_timer(const void *arg)
+{
+    (void)arg;
+    lowpower_restart_timer();
+    shell_print("[lowpower] Automatic sleep timer restarted (60 s)\r\n");
+    shell_print(SHELL_PROMPT);
 }
 
 /** @brief  Handle the "version" command
@@ -123,7 +208,9 @@ void handle_settime(const void *arg)
     RTC_DateTime_t dt = {0};
     RTC_FromUnixEpoch(a->unix_epoch, &dt);
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_SetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
         shell_printf("RTC set to 20%02u-%02u-%02u %02u:%02u:%02u\r\n",
                      dt.years, dt.months, dt.days,
@@ -142,21 +229,27 @@ void handle_rtc_settime(const void *arg)
     const rtc_settime_args_t *a = (const rtc_settime_args_t *)arg;
 
     if (!a->valid) {
-        shell_print("Usage: rtc-settime YYYY MM DD HH MM SS WD\r\n");
-        shell_print("  WD = weekday (1=Sun..7=Sat)\r\n");
+        shell_print("Usage: rtc-settime YYYY MM DD HH MM SS\r\n");
+        shell_print("  YYYY = 2000..2079\r\n");
+        return;
+    }
+
+    if (a->year < 2000 || a->year > 2079) {
+        shell_print("RTC year must be 2000..2079\r\n");
         return;
     }
 
     RTC_DateTime_t dt = {0};
-    dt.years    = (uint8_t)(a->year % 100);
+    dt.years    = (uint8_t)(a->year - 2000);
     dt.months   = a->months;
     dt.days     = a->days;
     dt.hours    = a->hours;
     dt.minutes  = a->minutes;
     dt.seconds  = a->seconds;
-    dt.weekdays = a->weekdays;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_SetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
         shell_printf("RTC set to 20%02u-%02u-%02u %02u:%02u:%02u\r\n",
                      dt.years, dt.months, dt.days,
@@ -175,11 +268,13 @@ void handle_rtc_gettime(const void *arg)
     (void)arg;
     RTC_DateTime_t dt = {0};
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_GetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
-        shell_printf("20%02u-%02u-%02u %02u:%02u:%02u (wd=%u)\r\n",
+        shell_printf("20%02u-%02u-%02u %02u:%02u:%02u\r\n",
                      dt.years, dt.months, dt.days,
-                     dt.hours, dt.minutes, dt.seconds, dt.weekdays);
+                     dt.hours, dt.minutes, dt.seconds);
     } else {
         shell_printf("RTC read failed (err %d)\r\n", status);
     }
@@ -194,7 +289,9 @@ void handle_rtc_temp(const void *arg)
     (void)arg;
     int8_t temp;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_GetTemperature(&temp);
+    lowpower_rtc_end(release_spi);
     if (status == RTC_OK) {
         shell_printf("RTC temperature: %d C\r\n", temp);
     } else {
@@ -221,10 +318,12 @@ void handle_rtc_timer_set(const void *arg)
     timer.auto_reload = false;
     timer.enabled     = true;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_SetTimer(&timer);
     if (status == RTC_OK) {
         status = RTC_EnableTimerInterrupt(true);
     }
+    lowpower_rtc_end(release_spi);
 
     if (status == RTC_OK) {
         shell_printf("RTC timer set to %u s\r\n", a->seconds);
@@ -241,6 +340,7 @@ void handle_rtc_timer_stop(const void *arg)
 {
     (void)arg;
 
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_EnableTimer(false);
     if (status == RTC_OK) {
         status = RTC_EnableTimerInterrupt(false);
@@ -248,6 +348,7 @@ void handle_rtc_timer_stop(const void *arg)
     if (status == RTC_OK) {
         status = RTC_ClearTimerFlag();
     }
+    lowpower_rtc_end(release_spi);
 
     if (status == RTC_OK) {
         shell_print("RTC timer stopped\r\n");
@@ -265,14 +366,20 @@ void handle_rtc_timer_status(const void *arg)
     (void)arg;
 
     RTC_Timer_t timer = {0};
+    bool triggered = false;
+    bool release_spi = lowpower_rtc_begin();
     RTC_Status_t status = RTC_GetTimer(&timer);
+    if (status == RTC_OK) {
+        triggered = RTC_IsTimerTriggered();
+    }
+    lowpower_rtc_end(release_spi);
 
     if (status == RTC_OK) {
         shell_printf("Timer: %s, value=%u, auto-reload=%s, triggered=%s\r\n",
                      timer.enabled ? "ON" : "OFF",
                      timer.timer_value,
                      timer.auto_reload ? "yes" : "no",
-                     RTC_IsTimerTriggered() ? "yes" : "no");
+                     triggered ? "yes" : "no");
     } else {
         shell_printf("RTC timer status failed (err %d)\r\n", status);
     }
@@ -287,6 +394,9 @@ void handle_rtc_timer_status(const void *arg)
 void handle_ctd(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     ctd_data_t data;
     if (ctd_ts(&data)) {
         shell_print("\nCTD Sensor Readings:\r\n");
@@ -303,6 +413,9 @@ void handle_ctd(const void *arg)
 void handle_optode(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     optode_data_t data;
     if (optode_sample(&data)) {
         shell_printf("\nOptode:\r\n");
@@ -323,13 +436,10 @@ void handle_optode(const void *arg)
 void handle_optode_listen(const void *arg)
 {
     (void)arg;
-    optode_listen();
-}
+    if (!sensor_shell_peripherals_available())
+        return;
 
-void handle_optode_setup(const void *arg)
-{
-    (void)arg;
-    optode_setup();
+    optode_listen();
 }
 
 /* WetLab Handlers --------------------------------------------------------*/
@@ -337,15 +447,18 @@ void handle_optode_setup(const void *arg)
 void handle_wetlab(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     wetlab_data_t data;
     if (wetlab_sample(&data)) {
         shell_print("\nWetLab:\r\n");
-        shell_printf("  CHL:        %u @ %u nm\r\n",
-                     data.chl_signal, data.chl_lambda);
-        shell_printf("  NTU:        %u @ %u nm\r\n",
-                     data.ntu_signal, data.ntu_lambda);
-        shell_printf("  CDOM:       %u @ %u nm\r\n",
-                     data.cdom_signal, data.cdom_lambda);
+        shell_printf("  CH1:        %u @ %u nm\r\n",
+                     data.ch1_signal, data.ch1_lambda);
+        shell_printf("  CH2:        %u @ %u nm\r\n",
+                     data.ch2_signal, data.ch2_lambda);
+        shell_printf("  CH3:       %u @ %u nm\r\n",
+                     data.ch3_signal, data.ch3_lambda);
         shell_printf("  Thermistor: %u\r\n", data.thermistor);
     } else {
         shell_printf("\nWetLab read failed\r\n");
@@ -355,6 +468,9 @@ void handle_wetlab(const void *arg)
 void handle_wetlab_raw(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     wetlab_raw();
 }
 
@@ -363,6 +479,9 @@ void handle_wetlab_raw(const void *arg)
 void handle_sensors(const void *arg)
 {
     (void)arg;
+    if (!sensor_shell_peripherals_available())
+        return;
+
     bool has_optode = config_has_optode();
     bool has_wetlab = config_has_wetlab();
 
@@ -394,10 +513,10 @@ void handle_sensors(const void *arg)
 
     if (has_wetlab) {
         if (reading.wetlab_ok) {
-            shell_printf("[WetLab] CHL=%u@%unm  NTU=%u@%unm  CDOM=%u@%unm  Therm=%u\r\n",
-                         reading.wetlab.chl_signal, reading.wetlab.chl_lambda,
-                         reading.wetlab.ntu_signal, reading.wetlab.ntu_lambda,
-                         reading.wetlab.cdom_signal, reading.wetlab.cdom_lambda,
+            shell_printf("[WetLab] CH1=%u@%unm  CH2=%u@%unm  CH3=%u@%unm  Therm=%u\r\n",
+                         reading.wetlab.ch1_signal, reading.wetlab.ch1_lambda,
+                         reading.wetlab.ch2_signal, reading.wetlab.ch2_lambda,
+                         reading.wetlab.ch3_signal, reading.wetlab.ch3_lambda,
                          reading.wetlab.thermistor);
         } else {
             shell_print("[WetLab] FAILED\r\n");
@@ -426,6 +545,21 @@ void handle_config(const void *arg)
     }
 }
 
+void handle_samplerate(const void *arg)
+{
+    uint32_t samplerate_ms = *(const uint32_t *)arg;
+
+    if (samplerate_ms != 0U) {
+        samplerate_ms = config_set_samplerate_ms(samplerate_ms);
+        shell_printf("Samplerate set to %lu ms\r\n", (unsigned long)samplerate_ms);
+    } else {
+        samplerate_ms = config_get_samplerate_ms();
+        shell_printf("Samplerate: %lu ms\r\n", (unsigned long)samplerate_ms);
+    }
+
+    shell_print(SHELL_PROMPT);
+}
+
 /* File System Handlers ---------------------------------------------------*/
 
 /** @brief  Handle the "fs-mount" command
@@ -435,16 +569,33 @@ void handle_config(const void *arg)
 void handle_fs_mount(const void *arg)
 {
     (void)arg;
+
+    if (lowpower_profile_peripherals_are_up()) {
+        shell_print("[fs] SD access is unavailable during a profile\r\n");
+        return;
+    }
+
+    lowpower_sd_spi_up();
     FS_Result_t res = filesystem_mount();
     switch (res) {
         case FS_OK:
-            shell_print("File system mounted\r\n");
+            g_app.sd_status = PERIPH_READY;
+            shell_print("File system mount OK\r\n");
+            (void)filesystem_unmount();
+            lowpower_sd_spi_down();
             break;
         case FS_ALREADY_MOUNTED:
+            g_app.sd_status = PERIPH_READY;
             shell_print("File system already mounted\r\n");
+            (void)filesystem_unmount();
+            lowpower_sd_spi_down();
             break;
         default:
-            shell_printf("Mount failed (err %d)\r\n", res);
+            g_app.sd_status = PERIPH_ERROR;
+            shell_printf("Mount failed (err %d fatfs %d)\r\n",
+                         res, filesystem_last_fatfs_result());
+            print_sd_diag();
+            lowpower_sd_spi_down();
             break;
     }
 }
@@ -468,27 +619,8 @@ void handle_fs_unmount(const void *arg)
             shell_printf("Unmount failed (err %d)\r\n", res);
             break;
     }
-}
 
-/** @brief  Handle the "fs-df" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_df(const void *arg)
-{
-    (void)arg;
-    uint32_t total, free_bytes, used_pct;
-
-    FS_Result_t res = filesystem_df(&total, &free_bytes, &used_pct);
-    if (res == FS_OK) {
-        shell_printf("Total: %lu bytes\r\n", total);
-        shell_printf("Free:  %lu bytes\r\n", free_bytes);
-        shell_printf("Used:  %lu%%\r\n", used_pct);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("df failed (err %d)\r\n", res);
-    }
+    lowpower_sd_spi_down();
 }
 
 /** @brief  Handle the "fs-ls" command
@@ -498,161 +630,30 @@ void handle_fs_df(const void *arg)
 void handle_fs_ls(const void *arg)
 {
     (void)arg;
-    FS_Result_t res = filesystem_ls(shell_print);
-    if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res != FS_OK) {
+    if (lowpower_profile_peripherals_are_up()) {
+        shell_print("[fs] SD access is unavailable during a profile\r\n");
+        return;
+    }
+
+    lowpower_sd_spi_up();
+    FS_Result_t res = filesystem_mount();
+    if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
+        g_app.sd_status = PERIPH_ERROR;
+        shell_printf("Mount failed (err %d fatfs %d)\r\n",
+                     res, filesystem_last_fatfs_result());
+        print_sd_diag();
+        lowpower_sd_spi_down();
+        return;
+    }
+
+    g_app.sd_status = PERIPH_READY;
+    res = filesystem_ls(shell_print);
+    if (res != FS_OK) {
         shell_printf("ls failed (err %d)\r\n", res);
     }
-}
 
-/** @brief  Handle the "fs-cat" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_cat(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0') {
-        shell_print("Usage: fs-cat <filename>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_cat(buf->filename, shell_print);
-    if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res == FS_FILE_NOT_FOUND) {
-        shell_printf("File not found: %s\r\n", buf->filename);
-    } else if (res != FS_OK) {
-        shell_printf("cat failed (err %d)\r\n", res);
-    }
-    shell_print("\r\n");
-}
-
-/** @brief  Handle the "fs-write" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_write(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0' || buf->file_data[0] == '\0') {
-        shell_print("Usage: fs-write <filename> <data>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_write(buf->filename, buf->file_data);
-    if (res == FS_OK) {
-        shell_printf("Written to %s\r\n", buf->filename);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("write failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-rm" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_rm(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0') {
-        shell_print("Usage: fs-rm <filename>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_rm(buf->filename);
-    if (res == FS_OK) {
-        shell_printf("Deleted %s\r\n", buf->filename);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res == FS_FILE_NOT_FOUND) {
-        shell_printf("File not found: %s\r\n", buf->filename);
-    } else {
-        shell_printf("rm failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-mkdir" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_mkdir(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->dirname[0] == '\0') {
-        shell_print("Usage: fs-mkdir <dirname>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_mkdir(buf->dirname);
-    if (res == FS_OK) {
-        shell_printf("Created directory %s\r\n", buf->dirname);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("mkdir failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-rmdir" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_rmdir(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->dirname[0] == '\0') {
-        shell_print("Usage: fs-rmdir <dirname>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_rmdir(buf->dirname);
-    if (res == FS_OK) {
-        shell_printf("Removed directory %s\r\n", buf->dirname);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else {
-        shell_printf("rmdir failed (err %d)\r\n", res);
-    }
-}
-
-/** @brief  Handle the "fs-cp" command
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_fs_cp(const void *arg)
-{
-    (void)arg;
-    FS_Buffers_t *buf = filesystem_get_buffers();
-
-    if (buf->filename[0] == '\0' || buf->dest_filename[0] == '\0') {
-        shell_print("Usage: fs-cp <source> <dest>\r\n");
-        return;
-    }
-
-    FS_Result_t res = filesystem_cp(buf->filename, buf->dest_filename);
-    if (res == FS_OK) {
-        shell_printf("Copied %s -> %s\r\n", buf->filename, buf->dest_filename);
-    } else if (res == FS_NOT_MOUNTED) {
-        shell_print("File system not mounted\r\n");
-    } else if (res == FS_FILE_NOT_FOUND) {
-        shell_printf("Source not found: %s\r\n", buf->filename);
-    } else {
-        shell_printf("cp failed (err %d)\r\n", res);
-    }
+    (void)filesystem_unmount();
+    lowpower_sd_spi_down();
 }
 
 /* WiFi Handlers ----------------------------------------------------------*/
@@ -664,21 +665,53 @@ void handle_wifi_status(const void *arg)
         "OFF", "INIT", "STREAMING", "ERROR"
     };
     wifi_state_t st = wifi_get_state();
-    shell_printf("WiFi state: %s (rx buf: %u bytes)\r\n",
-                 state_names[st], wifi_available());
+    shell_printf("WiFi state: %s (rx buf: %u, rx total: %lu)\r\n",
+                 state_names[st], wifi_available(), wifi_get_rx_count());
 }
 
-void handle_wifi_init(const void *arg)
+void handle_wifi_up(const void *arg)
 {
     (void)arg;
-    shell_print("[wifi] Re-initializing...\r\n");
-    wifi_init(&huart4);
+    if (lowpower_profile_peripherals_are_up()) {
+        shell_print("[wifi] WiFi is held down during profile acquisition\r\n");
+        return;
+    }
+
+    wifi_state_t state = wifi_get_state();
+    if (state == WIFI_STATE_STREAMING) {
+        shell_print("[wifi] Already up — state: STREAMING\r\n");
+        return;
+    }
+
+    if (state != WIFI_STATE_OFF) {
+        lowpower_wifi_stop();
+    }
+
+    shell_print("[wifi] Powering up...\r\n");
+    lowpower_wifi_start();
     shell_printf("[wifi] Done — state: %s\r\n",
                  wifi_get_state() == WIFI_STATE_STREAMING ? "STREAMING" : "ERROR");
 }
 
-void handle_realtime(const void *arg)
+void handle_wifi_down(const void *arg)
+{
+    (void)arg;
+    shell_print("[wifi] Powering down...\r\n");
+    lowpower_wifi_stop();
+    shell_print("[wifi] Done — state: OFF\r\n");
+}
+
+void handle_idata(const void *arg)
 {
     (void)arg;
     realtime_comm_stream();
+}
+
+void handle_who(const void *arg)
+{
+    (void)arg;
+    wifi_printf("%s\r\n", DEVICE_SERIAL);
+    wifi_prompt();
+    shell_printf("%s\r\n", DEVICE_SERIAL);
+    shell_print(SHELL_PROMPT);
 }

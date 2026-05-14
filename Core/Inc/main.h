@@ -53,12 +53,11 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
+void SystemClock_Config(void);
 
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define PC3_BATTMON_EN_Pin GPIO_PIN_3
-#define PC3_BATTMON_EN_GPIO_Port GPIOC
 #define SPI1_CS_Pin GPIO_PIN_4
 #define SPI1_CS_GPIO_Port GPIOA
 #define PB0_USART3_EN_Pin GPIO_PIN_0
@@ -67,18 +66,18 @@ void Error_Handler(void);
 #define PB1_USART2_EN_GPIO_Port GPIOB
 #define SD_PWR_Pin GPIO_PIN_2
 #define SD_PWR_GPIO_Port GPIOB
+#define RTC_INTod_Pin GPIO_PIN_10
+#define RTC_INTod_GPIO_Port GPIOB
 #define SPI2_CS_Pin GPIO_PIN_12
 #define SPI2_CS_GPIO_Port GPIOB
 #define CLK_OE_Pin GPIO_PIN_6
 #define CLK_OE_GPIO_Port GPIOC
-#define TIM3_CH2_CLOCKOUT_Pin GPIO_PIN_7
-#define TIM3_CH2_CLOCKOUT_GPIO_Port GPIOC
-#define PA8_USART1_RX_INT_Pin GPIO_PIN_8
-#define PA8_USART1_RX_INT_GPIO_Port GPIOA
 #define PB4_AUX_SEL_A0_Pin GPIO_PIN_4
 #define PB4_AUX_SEL_A0_GPIO_Port GPIOB
 #define PB5_AUX_SEL_A1_Pin GPIO_PIN_5
 #define PB5_AUX_SEL_A1_GPIO_Port GPIOB
+#define RECORD_TRIGGER_Pin GPIO_PIN_8
+#define RECORD_TRIGGER_GPIO_Port GPIOB
 #define PB9_TRUCK_INT_OUT_Pin GPIO_PIN_9
 #define PB9_TRUCK_INT_OUT_GPIO_Port GPIOB
 

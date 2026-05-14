@@ -20,12 +20,12 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 typedef struct {
-    uint16_t chl_lambda;  /* nm — channel 1 excitation wavelength */
-    uint16_t chl_signal;  /* counts — channel 1 (chlorophyll) */
-    uint16_t ntu_lambda;  /* nm — channel 2 excitation wavelength */
-    uint16_t ntu_signal;  /* counts — channel 2 (turbidity) */
-    uint16_t cdom_lambda; /* nm — channel 3 excitation wavelength */
-    uint16_t cdom_signal; /* counts — channel 3 (CDOM/fluorescence) */
+    uint16_t ch1_lambda;  /* nm — channel 1 excitation wavelength */
+    uint16_t ch1_signal;  /* counts — channel 1 */
+    uint16_t ch2_lambda;  /* nm — channel 2 excitation wavelength */
+    uint16_t ch2_signal;  /* counts — channel 2 */
+    uint16_t ch3_lambda; /* nm — channel 3 excitation wavelength */
+    uint16_t ch3_signal; /* counts — channel 3 */
     uint16_t thermistor;
 } wetlab_data_t;
 

@@ -21,6 +21,14 @@ extern "C" {
 #define SENSOR_CFG_CTD_OPTODE     2   /* CTD + Optode */
 #define SENSOR_CFG_ALL            3   /* CTD + Optode + WetLab */
 
+/* Profile sample-rate limits (seconds) */
+#define SAMPLE_RATE_MIN_SECONDS       4U
+#define SAMPLE_RATE_MAX_SECONDS      60U
+#define SAMPLE_RATE_DEFAULT_SECONDS   SAMPLE_RATE_MIN_SECONDS
+#define SAMPLE_RATE_MIN_MS            (SAMPLE_RATE_MIN_SECONDS * 1000UL)
+#define SAMPLE_RATE_MAX_MS            (SAMPLE_RATE_MAX_SECONDS * 1000UL)
+#define SAMPLE_RATE_DEFAULT_MS        SAMPLE_RATE_MIN_MS
+
 /* Timing constants (ms) */
 #define WETLAB_BOOT_MS              1500  /* Power-on to first valid data */
 #define SENSOR_COLLECT_WINDOW_MS    1200  /* DMA collection window after fire */
@@ -28,6 +36,9 @@ extern "C" {
 #define CTD_WAKEUP_TIMEOUT_MS         50  /* Per-attempt RX wait during wakeup */
 #define CTD_WAKEUP_RETRIES            10  /* Max wakeup attempts */
 #define OPTODE_WAKE_DELAY_MS         500  /* Delay after first (garbled) wake */
+
+/* Device identity */
+#define DEVICE_SERIAL              "PW002"
 
 /* Buffer sizes */
 #define CTD_RX_BUF_SIZE             1024
@@ -58,7 +69,7 @@ typedef enum {
 /* Global application state */
 typedef struct {
     sys_mode_t      mode;
-    volatile bool   start_flag;      /* EXTI PB8 — written from ISR */
+    volatile bool   start_flag;      /* PB8 record trigger request */
     periph_status_t sd_status;
     periph_status_t rtc_status;
     periph_status_t ctd_status;
@@ -73,6 +84,8 @@ extern app_state_t g_app;
 void     config_init(void);
 void     config_set_sensor_level(uint8_t level);
 uint8_t  config_get_sensor_level(void);
+uint32_t config_set_samplerate_ms(uint32_t ms);
+uint32_t config_get_samplerate_ms(void);
 bool     config_has_optode(void);
 bool     config_has_wetlab(void);
 

@@ -224,6 +224,17 @@ SECTIONS
   } >RAM
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
 
+  /* Uninitialized buffers placed in the second SRAM bank (RAM2). NOLOAD so
+   * startup does not attempt to zero-initialize these symbols; any module
+   * using this section is responsible for initializing its own state. */
+  .ram2_bss (NOLOAD) : ALIGN(4)
+  {
+    . = ALIGN(4);
+    *(.ram2_bss)
+    *(.ram2_bss*)
+    . = ALIGN(4);
+  } >RAM2
+
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
 

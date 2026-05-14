@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/shell.c
     Core/Src/filesystem.c
     Core/Src/ab-rtcmc-rtc.c
+    Core/Src/lowpower.c
     Core/Src/tasker.c
     Core/Src/task_handlers.c
     Core/Src/sd_spi.c
