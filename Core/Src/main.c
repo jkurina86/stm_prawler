@@ -139,29 +139,39 @@ int main(void)
 
   /* Turn off wifi to bring it to a known state */
   HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
-  HAL_Delay(2000);
 
   shell_printf("\r\nSystem Initialization...\r\n");
 
+  /* Bring in the Config vars/macros */
   config_init();
+
+  /* Initialize the RS232 transcievers */
   transceiver_init();
+
+  /* Initialize the task scheduler */
   tasker_init();
 
+  /* Initialize the filesystem */
   filesystem_init();
 
-  /* Initialize SD card and filesystem, mounts the FS, unmounts it, powers down the SD card, and powers down SPI1 */
+  /* Bring up SPI1, power up the SD card */
   lowpower_sd_spi_up();
+
+  /* Mount the filesystem */
   FS_Result_t fs_status = filesystem_mount();
   if (fs_status == FS_OK || fs_status == FS_ALREADY_MOUNTED) {
       g_app.sd_status = PERIPH_READY;
-      shell_print("SD CARD: OK\r\n");
-      (void)filesystem_unmount();
+      shell_print("SD CARD: OK\r\n"); /* SD Card/FS is good! */
+      (void)filesystem_unmount(); /* Unmount the filesystem */
   } else {
       g_app.sd_status = PERIPH_ERROR;
-      shell_printf("SD card mount failed\r\n");
+      shell_printf("SD card mount failed\r\n"); /* SD Card/FS is not good, doesn't halt boot */
   }
+
+  /* Power down the SD card and SPI1 */
   lowpower_sd_spi_down();
 
+  /* Initialize the external RTC */
   RTC_Status_t rtc_init_status = RTC_Init();
   if (rtc_init_status == RTC_OK) {
       g_app.rtc_status = PERIPH_READY;
@@ -170,21 +180,35 @@ int main(void)
       shell_printf("RTC init failed (err %d)\r\n", rtc_init_status);
   }
 
+  /* Initialize the CTD */
   ctd_init(&huart3);
   g_app.ctd_status = PERIPH_READY;
 
+  /* Initialize the optode */
   optode_init(&huart2);
   g_app.optode_status = PERIPH_READY;
 
+  /* Initialize the wetlab */
   wetlab_init(&huart5);
   g_app.wetlab_status = PERIPH_READY;
 
+  /* Initialize the recorder */
   recorder_init();
+
+  /* Initialize the low power manager */
   lowpower_init();
+
+  /* Put the sensors to sleep */
   lowpower_idle_peripherals_down();
+
+  /* Start the WiFi */
   lowpower_wifi_start();
+
+  /* Initialize the shell */
   shell_init();
-  lowpower_enter_idle(); /* Start the low power idle timer */
+
+  /* Start the low power idle timer */
+  lowpower_enter_idle();
 
   /* USER CODE END 2 */
 
@@ -195,13 +219,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    /* Main loop: feed the watchdog and poll the services */
     HAL_IWDG_Refresh(&hiwdg);
     shell_task();
     tasker_run();
     recorder_service();
     wifi_service();
     lowpower_service();
-
   }
   /* USER CODE END 3 */
 }

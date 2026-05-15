@@ -64,6 +64,7 @@ const shell_command_t shell_commands[] = {
     {"settime", "Set RTC from Unix epoch", cmd_settime},
     {"rtc-settime", "Set RTC date/time (YYYY MM DD HH MM SS)", cmd_rtc_settime},
     {"rtc-time", "Get current RTC date/time", cmd_rtc_gettime},
+    {"rtc-epoch", "Get current RTC Unix epoch", cmd_rtc_epoch},
     {"rtc-temp", "Get RTC temperature", cmd_rtc_temp},
     {"rtc-timer-set", "Set RTC timer (seconds)", cmd_rtc_timer_set},
     {"rtc-timer-stop", "Stop RTC timer", cmd_rtc_timer_stop},
@@ -465,6 +466,18 @@ void cmd_rtc_gettime(int argc, char **argv)
 {
     (void)argc; (void)argv; /* Unused args */
     tasker_enqueue(handle_rtc_gettime, NULL, 0);
+}
+
+/**
+  * @brief Schedule an RTC epoch read task
+  * @param argc: Argument count
+  * @param argv: Arguments
+  * @retval None
+  */
+void cmd_rtc_epoch(int argc, char **argv)
+{
+    (void)argc; (void)argv; /* Unused args */
+    tasker_enqueue(handle_rtc_epoch, NULL, 0);
 }
 
 /**

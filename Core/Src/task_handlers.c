@@ -280,6 +280,26 @@ void handle_rtc_gettime(const void *arg)
     }
 }
 
+/** @brief  Handle the "rtc-epoch" command
+  * @param  arg: Pointer to arguments (not used)
+  * @retval None
+  */
+void handle_rtc_epoch(const void *arg)
+{
+    (void)arg;
+    RTC_DateTime_t dt = {0};
+
+    bool release_spi = lowpower_rtc_begin();
+    RTC_Status_t status = RTC_GetDateTime(&dt);
+    lowpower_rtc_end(release_spi);
+    if (status == RTC_OK) {
+        uint32_t unix_epoch = RTC_ToUnixEpoch(&dt);
+        shell_printf("%lu\r\n", (unsigned long)unix_epoch);
+    } else {
+        shell_printf("RTC read failed (err %d)\r\n", status);
+    }
+}
+
 /** @brief  Handle the "rtc-temp" command
   * @param  arg: Pointer to arguments (not used)
   * @retval None

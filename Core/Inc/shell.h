@@ -67,6 +67,7 @@ void cmd_version(int argc, char **argv);
 void cmd_settime(int argc, char **argv);
 void cmd_rtc_settime(int argc, char **argv);
 void cmd_rtc_gettime(int argc, char **argv);
+void cmd_rtc_epoch(int argc, char **argv);
 void cmd_rtc_temp(int argc, char **argv);
 void cmd_rtc_timer_set(int argc, char **argv);
 void cmd_rtc_timer_stop(int argc, char **argv);

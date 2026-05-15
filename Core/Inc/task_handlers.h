@@ -54,6 +54,7 @@ void handle_version(const void *arg);
 void handle_settime(const void *arg);
 void handle_rtc_settime(const void *arg);
 void handle_rtc_gettime(const void *arg);
+void handle_rtc_epoch(const void *arg);
 void handle_rtc_temp(const void *arg);
 void handle_rtc_timer_set(const void *arg);
 void handle_rtc_timer_stop(const void *arg);
