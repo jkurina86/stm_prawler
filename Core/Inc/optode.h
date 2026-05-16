@@ -35,7 +35,7 @@ void optode_init(UART_HandleTypeDef *huart);
 bool optode_sample(optode_data_t *out);
 void optode_listen(void);
 
-/* Split-phase API for simultaneous sampling */
+/* Split fire/collect commands for simultaneous sampling */
 void optode_wake(void);
 bool optode_fire(void);
 bool optode_collect(optode_data_t *out);

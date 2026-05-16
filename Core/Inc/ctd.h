@@ -28,7 +28,7 @@ typedef struct {
 void ctd_init(UART_HandleTypeDef *huart);
 bool ctd_ts(ctd_data_t *out);
 
-/* Split-phase API for simultaneous sampling */
+/* Split fire/collect commands for simultaneous sampling */
 bool ctd_wakeup(void);
 bool ctd_fire(void);
 bool ctd_collect(ctd_data_t *out);
