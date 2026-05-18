@@ -18,6 +18,8 @@ extern "C" {
 /* Individual peripheral / pin-group helpers --------------------------------*/
 void lowpower_sd_spi_down(void);
 void lowpower_sd_spi_up(void);
+void lowpower_sensor_interfaces_down(void);
+void lowpower_sensor_interfaces_up(void);
 
 /* Aggregated low-power flow -------------------------------------------------*/
 void lowpower_init(void);

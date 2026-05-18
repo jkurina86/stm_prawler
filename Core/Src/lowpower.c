@@ -537,6 +537,26 @@ void lowpower_sd_spi_up(void)
 }
 
 /**
+ * @brief Power down the UART sensor interfaces and transceivers.
+ */
+void lowpower_sensor_interfaces_down(void)
+{
+    lowpower_wetlab_uart_down();
+    lowpower_optode_uart_down();
+    lowpower_ctd_uart_down();
+}
+
+/**
+ * @brief Bring up the UART sensor interfaces and transceivers.
+ */
+void lowpower_sensor_interfaces_up(void)
+{
+    lowpower_ctd_uart_up();
+    lowpower_optode_uart_up();
+    lowpower_wetlab_uart_up();
+}
+
+/**
  * @brief Deinitialize the external RTC SPI path and park its pins.
  */
 static void lowpower_rtc_spi_down(void)
@@ -649,9 +669,7 @@ void lowpower_idle_peripherals_down(void)
     lowpower_unmount_filesystem();
     lowpower_sd_spi_down();
     lowpower_rtc_spi_down();
-    lowpower_wetlab_uart_down();
-    lowpower_optode_uart_down();
-    lowpower_ctd_uart_down();
+    lowpower_sensor_interfaces_down();
     g_lowpower_state.profile_peripherals_up = false;
 }
 
@@ -668,9 +686,7 @@ void lowpower_profile_peripherals_up(void)
     lowpower_sd_spi_down();
     lowpower_wifi_stop();
     lowpower_rtc_spi_up();
-    lowpower_ctd_uart_up();
-    lowpower_optode_uart_up();
-    lowpower_wetlab_uart_up();
+    lowpower_sensor_interfaces_up();
 
     g_lowpower_state.profile_peripherals_up = true;
 }
@@ -682,9 +698,7 @@ void lowpower_profile_peripherals_down(void)
 {
     lowpower_unmount_filesystem();
     lowpower_sd_spi_down();
-    lowpower_wetlab_uart_down();
-    lowpower_optode_uart_down();
-    lowpower_ctd_uart_down();
+    lowpower_sensor_interfaces_down();
     lowpower_rtc_spi_down();
 
     g_lowpower_state.profile_peripherals_up = false;

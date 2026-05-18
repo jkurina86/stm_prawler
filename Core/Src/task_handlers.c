@@ -499,8 +499,18 @@ void handle_wetlab_raw(const void *arg)
 void handle_sensors(const void *arg)
 {
     (void)arg;
-    if (!sensor_shell_peripherals_available())
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[sensors] Command is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
         return;
+    }
+
+    bool already_up = lowpower_profile_peripherals_are_up();
+    if (!already_up) {
+        shell_print("[sensors] Powering UART sensor interfaces\r\n");
+        lowpower_sensor_interfaces_up();
+    }
 
     bool has_optode = config_has_optode();
     bool has_wetlab = config_has_wetlab();
@@ -509,6 +519,11 @@ void handle_sensors(const void *arg)
     sensor_reading_t reading;
     sensors_sample(&reading);
     uint32_t elapsed = HAL_GetTick() - t0;
+
+    if (!already_up) {
+        lowpower_sensor_interfaces_down();
+        lowpower_enter_idle();
+    }
 
     shell_printf("[sensors] Time elapsed: %lu ms\r\n", elapsed);
 
@@ -541,6 +556,10 @@ void handle_sensors(const void *arg)
         } else {
             shell_print("[WetLab] FAILED\r\n");
         }
+    }
+
+    if (!already_up) {
+        shell_print("[sensors] UART sensor interfaces down\r\n");
     }
 }
 
