@@ -440,6 +440,7 @@ void handle_optode(const void *arg)
     if (optode_sample(&data)) {
         shell_printf("\nOptode:\r\n");
         shell_printf("O2 Concentration: %.3f uM\r\n", data.o2_concentration);
+        shell_printf("Air Saturation:   %.3f %%\r\n", data.air_saturation);
         shell_printf("Temperature:      %.3f C\r\n", data.temperature);
         shell_printf("CalPhase:         %.3f deg\r\n", data.cal_phase);
         shell_printf("TCPhase:          %.3f deg\r\n", data.tc_phase);
@@ -537,10 +538,11 @@ void handle_sensors(const void *arg)
 
     if (has_optode) {
         if (reading.optode_ok) {
-            shell_printf("[Optode] O2=%.3f uM  T=%.3f C  CalPh=%.3f\r\n",
-                         reading.optode.o2_concentration,
-                         reading.optode.temperature,
-                         reading.optode.cal_phase);
+            shell_printf("[Optode] O2=%.3f uM  AirSat=%.3f %%  T=%.3f C  CalPh=%.3f\r\n",
+                          reading.optode.o2_concentration,
+                          reading.optode.air_saturation,
+                          reading.optode.temperature,
+                          reading.optode.cal_phase);
         } else {
             shell_print("[Optode] FAILED\r\n");
         }

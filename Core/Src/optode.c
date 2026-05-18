@@ -144,13 +144,13 @@ static uint16_t optode_send_sample(bool with_preamble)
 /**
  * @brief  Parse a tab-separated measurement line into an optode_data_t.
  *
- * Current sensor config (Enable AirSaturation=No, Enable Rawdata=Yes):
- *   4330\t1638\tO2Conc\tTemp\tCalPhase\tTCPhase\tC1RPh\tC2RPh\tC1Amp\tC2Amp\tRawTemp
+ * Current sensor config (Enable AirSaturation=Yes, Enable Rawdata=Yes):
+ *   4330\t1638\tO2Conc\tAirSat\tTemp\tCalPhase\tTCPhase\tC1RPh\tC2RPh\tC1Amp\tC2Amp\tRawTemp
  * With Enable Text=No the labels are omitted; field order is the same.
  *
  * Strategy: first two tab tokens are product/serial (integers) — skip them.
  * Remaining tokens: try strtof(); skip text labels (endptr == token).
- * Assign first two successful floats to O2 concentration and temperature.
+ * Assign parsed floats in the configured output order.
  */
 static bool optode_parse(char *line, optode_data_t *out)
 {
@@ -163,26 +163,27 @@ static bool optode_parse(char *line, optode_data_t *out)
     if (!tok) return false;
 
     int idx = 0;
-    float vals[9];
-    while ((tok = strtok(NULL, "\t")) != NULL && idx < 9) {
+    float vals[10];
+    while ((tok = strtok(NULL, "\t")) != NULL && idx < 10) {
         char *end;
         float v = strtof(tok, &end);
         if (end == tok)
             continue;   /* text label — skip */
         vals[idx++] = v;
     }
-    if (idx < 9)
+    if (idx < 10)
         return false;
 
     out->o2_concentration = vals[0];
-    out->temperature      = vals[1];
-    out->cal_phase        = vals[2];
-    out->tc_phase         = vals[3];
-    out->c1_rph           = vals[4];
-    out->c2_rph           = vals[5];
-    out->c1_amp           = vals[6];
-    out->c2_amp           = vals[7];
-    out->raw_temp         = vals[8];
+    out->air_saturation   = vals[1];
+    out->temperature      = vals[2];
+    out->cal_phase        = vals[3];
+    out->tc_phase         = vals[4];
+    out->c1_rph           = vals[5];
+    out->c2_rph           = vals[6];
+    out->c1_amp           = vals[7];
+    out->c2_amp           = vals[8];
+    out->raw_temp         = vals[9];
     return true;
 }
 

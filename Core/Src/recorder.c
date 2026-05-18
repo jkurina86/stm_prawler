@@ -186,11 +186,12 @@ static int format_measurement_csv(char *buf, size_t buf_size,
 {
     return snprintf(buf, buf_size,
         "%lu,%lu,%f,%f,%f,"
-        "%f,%f,%f,%f,%f,%f,%f,%f,%f,"
+        "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,"
         "%u,%u,%u,%u,%u,%u,%u\r\n",
         measurement_num, (unsigned long)m->timestamp,
         m->ctd.conductivity, m->ctd.temperature, m->ctd.pressure,
-        m->optode.o2_concentration, m->optode.temperature,
+        m->optode.o2_concentration, m->optode.air_saturation,
+        m->optode.temperature,
         m->optode.cal_phase, m->optode.tc_phase,
         m->optode.c1_rph, m->optode.c2_rph,
         m->optode.c1_amp, m->optode.c2_amp, m->optode.raw_temp,
@@ -231,7 +232,7 @@ static bool flush_profile_to_sd(void)
 
     static const char hdr[] =
         "MeasurementNo,Unix_Epoch_UTC,CTD_C,CTD_T,CTD_D,"
-        "Optode_O2,Optode_Temp,Optode_Cal_Ph,Optode_Tc_Ph,"
+        "Optode_O2,Optode_AirSat,Optode_Temp,Optode_Cal_Ph,Optode_Tc_Ph,"
         "Optode_C1_Ph,Optode_C2_Ph,Optode_C1_Amp,Optode_C2_Amp,Optode_Temp_raw,"
         "Wetlab_C1_lambda,Wetlab_C1_signal,Wetlab_C2_lambda,Wetlab_C2_signal,"
         "Wetlab_C3_lambda,Wetlab_C3_signal,Wetlab_Therm\r\n";
@@ -240,7 +241,7 @@ static bool flush_profile_to_sd(void)
         return false;
     }
 
-    char line_buf[256];
+    char line_buf[320];
     for (uint16_t i = 0; i < g_profile.count; i++) {
         int len = format_measurement_csv(line_buf, sizeof(line_buf),
                                          &g_profile.measurements[i], i + 1);

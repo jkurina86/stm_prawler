@@ -20,6 +20,7 @@ extern "C" {
 /* Exported types ------------------------------------------------------------*/
 typedef struct {
     float o2_concentration;  /* uM */
+    float air_saturation;    /* % */
     float temperature;       /* deg C */
     float cal_phase;         /* deg */
     float tc_phase;          /* deg */

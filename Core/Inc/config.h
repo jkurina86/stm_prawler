@@ -42,7 +42,7 @@ extern "C" {
 
 /* Buffer sizes */
 #define CTD_RX_BUF_SIZE             1024
-#define OPTODE_RX_BUF_SIZE          1024
+#define OPTODE_RX_BUF_SIZE          2048
 #define WIFI_PRINTF_BUF_SIZE         256
 
 /* Number of measurements per recording session */
