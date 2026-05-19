@@ -444,6 +444,7 @@ void handle_optode(const void *arg)
     if (!already_up) {
         shell_print("[optode] Powering UART sensor interfaces\r\n");
         lowpower_sensor_interfaces_up();
+        HAL_Delay(1200);
     }
 
     optode_data_t data;
