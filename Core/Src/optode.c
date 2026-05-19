@@ -23,6 +23,12 @@ static volatile bool rx_done = false;
 static volatile uint16_t rx_len = 0;
 static uint8_t rx_buf[OPTODE_RX_BUF_SIZE];
 
+#define OPTODE_RESPONSE_MAX_MS 3500UL
+#if (WETLAB_BOOT_MS + SENSOR_COLLECT_WINDOW_MS) > OPTODE_RESPONSE_MAX_MS
+#error "Optode split-phase wait exceeds response max"
+#endif
+#define OPTODE_RESPONSE_GRACE_MS (OPTODE_RESPONSE_MAX_MS - WETLAB_BOOT_MS - SENSOR_COLLECT_WINDOW_MS)
+
 /*
  * Wake-up preamble: '/' comment characters
  * followed by CR+LF to terminate the comment line.  The sensor ignores
@@ -142,7 +148,7 @@ static uint16_t optode_send_sample(bool with_preamble)
 }
 
 /**
- * @brief  Parse a tab-separated measurement line into an optode_data_t.
+ * @brief  Parse a whitespace-separated measurement line into an optode_data_t.
  *
  * Current sensor config (Enable AirSaturation=Yes, Enable Rawdata=Yes):
  *   4330\t1638\tO2Conc\tAirSat\tTemp\tCalPhase\tTCPhase\tC1RPh\tC2RPh\tC1Amp\tC2Amp\tRawTemp
@@ -155,23 +161,25 @@ static uint16_t optode_send_sample(bool with_preamble)
 static bool optode_parse(char *line, optode_data_t *out)
 {
     /* Skip product_no token */
-    char *tok = strtok(line, "\t");
+    char *tok = strtok(line, " \t\r\n");
     if (!tok) return false;
 
     /* Skip serial_no token */
-    tok = strtok(NULL, "\t");
+    tok = strtok(NULL, " \t\r\n");
     if (!tok) return false;
 
     int idx = 0;
     float vals[10];
-    while ((tok = strtok(NULL, "\t")) != NULL && idx < 10) {
+    while ((tok = strtok(NULL, " \t\r\n")) != NULL) {
         char *end;
         float v = strtof(tok, &end);
         if (end == tok)
             continue;   /* text label — skip */
+        if (idx >= 10)
+            return false;
         vals[idx++] = v;
     }
-    if (idx < 10)
+    if (idx != 10)
         return false;
 
     out->o2_concentration = vals[0];
@@ -283,7 +291,18 @@ bool optode_fire(void)
 bool optode_collect(optode_data_t *out)
 {
     const uint16_t buf_size = sizeof(rx_buf) - 1;
-    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
+    uint16_t total = 0;
+
+    uint32_t t0 = HAL_GetTick();
+    do {
+        total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
+        if (total > 0 &&
+            (memchr(rx_buf, '#', total) || memchr(rx_buf, '*', total))) {
+            break;
+        }
+    } while ((HAL_GetTick() - t0) < OPTODE_RESPONSE_GRACE_MS &&
+             total < buf_size);
+
     HAL_UART_AbortReceive(optode_huart);
 
     if (total == 0)
