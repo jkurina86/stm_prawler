@@ -243,6 +243,60 @@ bool optode_sample(optode_data_t *out)
     return optode_parse_response((char *)rx_buf, out);
 }
 
+uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
+{
+    const char *cmd = "do sample\r\n";
+    uint32_t t0;
+    uint32_t last_rx;
+    uint16_t total = 0;
+
+    optode_reset_uart();
+
+    if (!optode_arm_rx(rx_buf, sizeof(rx_buf) - 1))
+        return 0;
+
+    if (!optode_tx((const uint8_t *)cmd, strlen(cmd))) {
+        HAL_UART_Abort(optode_huart);
+        return 0;
+    }
+
+    t0 = HAL_GetTick();
+    last_rx = t0;
+    while ((HAL_GetTick() - t0) < 3000 && total < sizeof(rx_buf) - 1) {
+        if (rx_done) {
+            if (rx_len > 0) {
+                total += rx_len;
+                last_rx = HAL_GetTick();
+                if (memchr(rx_buf + total - rx_len, '#', rx_len))
+                    break;
+                if (memchr(rx_buf + total - rx_len, '*', rx_len))
+                    break;
+            }
+
+            uint16_t remaining = sizeof(rx_buf) - 1 - total;
+            if (remaining == 0)
+                break;
+            if (!optode_arm_rx(rx_buf + total, remaining))
+                break;
+        } else if (total > 0 && (HAL_GetTick() - last_rx) > 250) {
+            break;
+        }
+    }
+    HAL_UART_AbortReceive(optode_huart);
+
+    rx_buf[total] = '\0';
+
+    if (out != NULL && max_len > 0) {
+        uint16_t copy_len = total;
+        if (copy_len >= max_len)
+            copy_len = max_len - 1;
+        memcpy(out, rx_buf, copy_len);
+        out[copy_len] = '\0';
+    }
+
+    return total;
+}
+
 /* Split-phase API for simultaneous sampling --------------------------------*/
 
 void optode_wake(void)

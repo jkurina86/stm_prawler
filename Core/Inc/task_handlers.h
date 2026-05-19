@@ -65,6 +65,7 @@ void handle_ctd(const void *arg);
 
 /* Optode */
 void handle_optode(const void *arg);
+void handle_optode_raw(const void *arg);
 void handle_optode_listen(const void *arg);
 
 /* WetLab */

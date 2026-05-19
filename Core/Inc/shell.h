@@ -78,6 +78,7 @@ void cmd_ctd(int argc, char **argv);
 
 /* Optode Command functions */
 void cmd_optode(int argc, char **argv);
+void cmd_optode_raw(int argc, char **argv);
 void cmd_optode_listen(int argc, char **argv);
 
 /* WetLab Command functions */

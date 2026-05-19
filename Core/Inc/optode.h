@@ -34,6 +34,7 @@ typedef struct {
 /* Function prototypes -------------------------------------------------------*/
 void optode_init(UART_HandleTypeDef *huart);
 bool optode_sample(optode_data_t *out);
+uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len);
 void optode_listen(void);
 
 /* Split fire/collect commands for simultaneous sampling */

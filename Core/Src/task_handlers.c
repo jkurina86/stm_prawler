@@ -475,6 +475,43 @@ void handle_optode(const void *arg)
     }
 }
 
+void handle_optode_raw(const void *arg)
+{
+    (void)arg;
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[optode-raw] Command is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
+        return;
+    }
+
+    bool already_up = lowpower_profile_peripherals_are_up();
+    if (!already_up) {
+        shell_print("[optode-raw] Powering UART sensor interfaces\r\n");
+        lowpower_sensor_interfaces_up();
+    }
+
+    static uint8_t raw[OPTODE_RX_BUF_SIZE];
+    uint16_t len = optode_sample_raw(raw, sizeof(raw));
+
+    if (!already_up) {
+        lowpower_sensor_interfaces_down();
+        lowpower_enter_idle();
+    }
+
+    if (len > 0) {
+        shell_printf("\r\n[optode-raw] %u bytes:\r\n", len);
+        shell_print((const char *)raw);
+        shell_print("\r\n");
+    } else {
+        shell_print("\r\n[optode-raw] No response\r\n");
+    }
+
+    if (!already_up) {
+        shell_print("[optode-raw] UART sensor interfaces down\r\n");
+    }
+}
+
 void handle_optode_listen(const void *arg)
 {
     (void)arg;

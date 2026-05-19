@@ -75,6 +75,7 @@ const shell_command_t shell_commands[] = {
 
     /* Optode Commands */
     {"optode", "Get Optode sensor data", cmd_optode},
+    {"optode-raw", "Dump raw Optode sample response", cmd_optode_raw},
     {"optode-listen", "Power-cycle optode and listen", cmd_optode_listen},
 
     /* WetLab Commands */
@@ -587,6 +588,12 @@ void cmd_optode(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_optode, NULL, 0);
+}
+
+void cmd_optode_raw(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_optode_raw, NULL, 0);
 }
 
 void cmd_optode_listen(int argc, char **argv)
