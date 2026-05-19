@@ -24,15 +24,15 @@ void sensors_sample(sensor_reading_t *reading)
     if (has_wetlab)
         HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
 
-    /* 2. Wake CTD and Optode while WetLab boots */
-    if (has_optode)
+    /* 2. Wake and fire Optode while WetLab boots */
+    if (has_optode) {
         optode_wake();
-    ctd_wakeup();
-
-    /* 3. Fire CTD and Optode */
-    reading->ctd_ok = ctd_fire();
-    if (has_optode)
         reading->optode_ok = optode_fire();
+    }
+
+    /* 3. Wake and fire CTD */
+    ctd_wakeup();
+    reading->ctd_ok = ctd_fire();
 
     /* 4. Wait for WetLab to start auto-transmitting */
     HAL_Delay(WETLAB_BOOT_MS);

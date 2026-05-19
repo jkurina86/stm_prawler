@@ -23,12 +23,6 @@ static volatile bool rx_done = false;
 static volatile uint16_t rx_len = 0;
 static uint8_t rx_buf[OPTODE_RX_BUF_SIZE];
 
-#define OPTODE_RESPONSE_MAX_MS 3500UL
-#if (WETLAB_BOOT_MS + SENSOR_COLLECT_WINDOW_MS) > OPTODE_RESPONSE_MAX_MS
-#error "Optode split-phase wait exceeds response max"
-#endif
-#define OPTODE_RESPONSE_GRACE_MS (OPTODE_RESPONSE_MAX_MS - WETLAB_BOOT_MS - SENSOR_COLLECT_WINDOW_MS)
-
 /*
  * Wake-up preamble: '/' comment characters
  * followed by CR+LF to terminate the comment line.  The sensor ignores
@@ -291,18 +285,7 @@ bool optode_fire(void)
 bool optode_collect(optode_data_t *out)
 {
     const uint16_t buf_size = sizeof(rx_buf) - 1;
-    uint16_t total = 0;
-
-    uint32_t t0 = HAL_GetTick();
-    do {
-        total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
-        if (total > 0 &&
-            (memchr(rx_buf, '#', total) || memchr(rx_buf, '*', total))) {
-            break;
-        }
-    } while ((HAL_GetTick() - t0) < OPTODE_RESPONSE_GRACE_MS &&
-             total < buf_size);
-
+    uint16_t total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
     HAL_UART_AbortReceive(optode_huart);
 
     if (total == 0)
