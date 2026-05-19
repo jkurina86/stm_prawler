@@ -489,7 +489,7 @@ void handle_optode_raw(const void *arg)
     if (!already_up) {
         shell_print("[optode-raw] Powering UART sensor interfaces\r\n");
         lowpower_sensor_interfaces_up();
-        HAL_Delay(1250);
+        HAL_Delay(500);
     }
 
     static uint8_t raw[OPTODE_RX_BUF_SIZE];

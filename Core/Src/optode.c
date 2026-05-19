@@ -266,7 +266,7 @@ uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
         return 0;
     }
 
-    HAL_Delay(250);
+    HAL_Delay(50);
     HAL_UART_AbortReceive(optode_huart);
     optode_reset_uart();
 
