@@ -246,9 +246,8 @@ bool optode_sample(optode_data_t *out)
 uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
 {
     static const char raw_wake_preamble[] =
-        ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\r\n"
-        ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\r\n"
-        ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\r\n";
+        ";;;;;;;;;;\r\n"
+        ";;;;;;;;;;\r\n";
     const char *cmd = "do sample\r\n";
     const uint16_t buf_size = sizeof(rx_buf) - 1;
     uint16_t total = 0;
@@ -267,7 +266,7 @@ uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
         return 0;
     }
 
-    HAL_Delay(OPTODE_WAKE_DELAY_MS);
+    HAL_Delay(250);
     HAL_UART_AbortReceive(optode_huart);
     optode_reset_uart();
 
@@ -282,7 +281,7 @@ uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
         return 0;
     }
 
-    HAL_Delay(3000);
+    HAL_Delay(1100);
     total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
     HAL_UART_AbortReceive(optode_huart);
 
