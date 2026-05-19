@@ -245,11 +245,29 @@ bool optode_sample(optode_data_t *out)
 
 uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
 {
+    static const char raw_wake_preamble[] =
+        "///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////\r\n"
+        "///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////\r\n"
+        "///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////\r\n"
+        "// Wake up\r\n";
     const char *cmd = "do sample\r\n";
     uint32_t t0;
     uint32_t last_rx;
     uint16_t total = 0;
 
+    optode_reset_uart();
+
+    if (!optode_arm_rx(rx_buf, sizeof(rx_buf) - 1))
+        return 0;
+
+    if (!optode_tx((const uint8_t *)raw_wake_preamble,
+                   sizeof(raw_wake_preamble) - 1)) {
+        HAL_UART_Abort(optode_huart);
+        return 0;
+    }
+
+    HAL_Delay(OPTODE_WAKE_DELAY_MS);
+    HAL_UART_AbortReceive(optode_huart);
     optode_reset_uart();
 
     if (!optode_arm_rx(rx_buf, sizeof(rx_buf) - 1))
