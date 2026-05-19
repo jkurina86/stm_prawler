@@ -111,6 +111,13 @@ static uint16_t optode_send_sample(bool with_preamble)
             HAL_UART_Abort(optode_huart);
             return 0;
         }
+
+        HAL_Delay(OPTODE_WAKE_DELAY_MS);
+        HAL_UART_AbortReceive(optode_huart);
+        optode_reset_uart();
+
+        if (!optode_arm_rx(rx_buf, sizeof(rx_buf) - 1))
+            return 0;
     }
 
     if (!optode_tx((const uint8_t *)cmd, strlen(cmd))) {
@@ -189,6 +196,34 @@ static bool optode_parse(char *line, optode_data_t *out)
     return true;
 }
 
+static bool optode_parse_response(char *buf, optode_data_t *out)
+{
+    char *line = buf;
+
+    while (*line) {
+        while (*line == '\r' || *line == '\n')
+            line++;
+        if (!*line)
+            break;
+
+        char *eol = line;
+        while (*eol && *eol != '\r' && *eol != '\n')
+            eol++;
+
+        char saved = *eol;
+        *eol = '\0';
+
+        if (optode_parse(line, out))
+            return true;
+
+        if (saved == '\0')
+            break;
+        line = eol + 1;
+    }
+
+    return false;
+}
+
 bool optode_sample(optode_data_t *out)
 {
     /* First attempt: preamble wakes sensor from Communication Sleep */
@@ -205,14 +240,7 @@ bool optode_sample(optode_data_t *out)
     if (total == 0)
         return false;
 
-    /* Find the first digit in the buffer (start of product number) */
-    char *p = (char *)rx_buf;
-    while (*p && (*p < '0' || *p > '9'))
-        p++;
-    if (!*p)
-        return false;
-
-    return optode_parse(p, out);
+    return optode_parse_response((char *)rx_buf, out);
 }
 
 /* Split-phase API for simultaneous sampling --------------------------------*/
@@ -293,14 +321,7 @@ bool optode_collect(optode_data_t *out)
 
     rx_buf[total] = '\0';
 
-    /* Find the first digit in the buffer (start of product number) */
-    char *p = (char *)rx_buf;
-    while (*p && (*p < '0' || *p > '9'))
-        p++;
-    if (!*p)
-        return false;
-
-    return optode_parse(p, out);
+    return optode_parse_response((char *)rx_buf, out);
 }
 
 void optode_listen(void)
