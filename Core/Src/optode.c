@@ -250,14 +250,16 @@ uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
         ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\r\n"
         ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\r\n";
     const char *cmd = "do sample\r\n";
-    uint32_t t0;
-    uint32_t last_rx;
+    const uint16_t buf_size = sizeof(rx_buf) - 1;
     uint16_t total = 0;
 
     optode_reset_uart();
 
-    if (!optode_arm_rx(rx_buf, sizeof(rx_buf) - 1))
+    if (HAL_UART_Receive_DMA(optode_huart, rx_buf, buf_size) != HAL_OK)
         return 0;
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(optode_huart->Instance->CR3, USART_CR3_EIE);
 
     if (!optode_tx((const uint8_t *)raw_wake_preamble,
                    sizeof(raw_wake_preamble) - 1)) {
@@ -269,36 +271,19 @@ uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
     HAL_UART_AbortReceive(optode_huart);
     optode_reset_uart();
 
-    if (!optode_arm_rx(rx_buf, sizeof(rx_buf) - 1))
+    if (HAL_UART_Receive_DMA(optode_huart, rx_buf, buf_size) != HAL_OK)
         return 0;
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_HT);
+    __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_TC);
+    CLEAR_BIT(optode_huart->Instance->CR3, USART_CR3_EIE);
 
     if (!optode_tx((const uint8_t *)cmd, strlen(cmd))) {
         HAL_UART_Abort(optode_huart);
         return 0;
     }
 
-    t0 = HAL_GetTick();
-    last_rx = t0;
-    while ((HAL_GetTick() - t0) < 3000 && total < sizeof(rx_buf) - 1) {
-        if (rx_done) {
-            if (rx_len > 0) {
-                total += rx_len;
-                last_rx = HAL_GetTick();
-                if (memchr(rx_buf + total - rx_len, '#', rx_len))
-                    break;
-                if (memchr(rx_buf + total - rx_len, '*', rx_len))
-                    break;
-            }
-
-            uint16_t remaining = sizeof(rx_buf) - 1 - total;
-            if (remaining == 0)
-                break;
-            if (!optode_arm_rx(rx_buf + total, remaining))
-                break;
-        } else if (total > 0 && (HAL_GetTick() - last_rx) > 250) {
-            break;
-        }
-    }
+    HAL_Delay(3000);
+    total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
     HAL_UART_AbortReceive(optode_huart);
 
     rx_buf[total] = '\0';
