@@ -23,13 +23,7 @@ static volatile bool rx_done = false;
 static volatile uint16_t rx_len = 0;
 static uint8_t rx_buf[OPTODE_RX_BUF_SIZE];
 
-/*
- * Wake-up preamble: '/' comment characters
- * followed by CR+LF to terminate the comment line.  The sensor ignores
- * comment lines (no response), but the incoming bytes wake it from
- * Communication Sleep.  See datasheet section 5.6.
- */
-static const char wake_preamble[] = "////////\r\n";
+static const char wake_preamble[] = ";;;;;;;;;;\r\n";
 
 /* Callback notify functions (called from centralized HAL callbacks) ----------*/
 
@@ -246,7 +240,7 @@ void optode_wake(void)
     __HAL_DMA_DISABLE_IT(optode_huart->hdmarx, DMA_IT_TC);
     CLEAR_BIT(optode_huart->Instance->CR3, USART_CR3_EIE);
 
-    /* TX wake preamble */
+    /* TX ignored comment lines to wake the Optode communication interface. */
     tx_done = false;
     if (HAL_UART_Transmit_DMA(optode_huart,
                                (uint8_t *)wake_preamble,
@@ -262,8 +256,7 @@ void optode_wake(void)
         }
     }
 
-    /* Wait up to 500 ms for any error response, then discard */
-    HAL_Delay(OPTODE_WAKE_DELAY_MS);
+    HAL_Delay(10);
     HAL_UART_AbortReceive(optode_huart);
 }
 
@@ -381,4 +374,3 @@ void optode_listen(void)
 
     shell_printf("\r\n[optode] No match at any baud rate.\r\n");
 }
-
