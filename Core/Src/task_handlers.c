@@ -433,11 +433,28 @@ void handle_ctd(const void *arg)
 void handle_optode(const void *arg)
 {
     (void)arg;
-    if (!sensor_shell_peripherals_available())
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[optode] Command is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
         return;
+    }
+
+    bool already_up = lowpower_profile_peripherals_are_up();
+    if (!already_up) {
+        shell_print("[optode] Powering UART sensor interfaces\r\n");
+        lowpower_sensor_interfaces_up();
+    }
 
     optode_data_t data;
-    if (optode_sample(&data)) {
+    bool ok = optode_sample(&data);
+
+    if (!already_up) {
+        lowpower_sensor_interfaces_down();
+        lowpower_enter_idle();
+    }
+
+    if (ok) {
         shell_printf("\nOptode:\r\n");
         shell_printf("O2 Concentration: %.3f uM\r\n", data.o2_concentration);
         shell_printf("Air Saturation:   %.3f %%\r\n", data.air_saturation);
@@ -451,6 +468,10 @@ void handle_optode(const void *arg)
         shell_printf("RawTemp:          %.1f mV\r\n", data.raw_temp);
     } else {
         shell_printf("\nOptode read failed\r\n");
+    }
+
+    if (!already_up) {
+        shell_print("[optode] UART sensor interfaces down\r\n");
     }
 }
 
