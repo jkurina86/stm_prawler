@@ -17,7 +17,9 @@
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define RT_BUF_SIZE          12288   /* 12 KB: fits worst-case variable-width realtime CSV */
+#define RT_CFG_ALL_HEADER_BYTES  27U
+#define RT_CFG_ALL_ROW_BYTES     49U
+#define RT_BUF_SIZE              (RT_CFG_ALL_HEADER_BYTES + (IDATA_CFG_ALL * RT_CFG_ALL_ROW_BYTES))
 #define RT_LEN_ASCII_LEN     4U
 
 /* Private variables ---------------------------------------------------------*/
@@ -27,6 +29,15 @@ static uint16_t rt_crc;
 /* Flag prevents re-sending the same profile. Initialized to 1 so a
  * realtime request before any profile has been built reports No_Data. */
 static uint8_t data_sent = 1;
+
+static uint16_t rt_idata_row_limit(uint8_t sensor_level)
+{
+    switch (sensor_level) {
+    case SENSOR_CFG_CTD_ONLY:   return IDATA_CTD_ONLY;
+    case SENSOR_CFG_CTD_OPTODE: return IDATA_CTD_OPTODE;
+    default:                    return IDATA_CFG_ALL;
+    }
+}
 
 /**
  * @brief Consume one byte into the CRC-16/XMODEM accumulator.
@@ -93,6 +104,7 @@ void realtime_comm_build(const profile_data_t *profile)
     uint32_t crc_accum = 0;
     uint16_t csv_len;
     uint16_t rows_built = 0;
+    uint16_t row_limit = profile->count;
     bool has_optode = false;
     bool has_wetlab = false;
 
@@ -134,7 +146,12 @@ void realtime_comm_build(const profile_data_t *profile)
     /* Initialize the CSV length */
     csv_len = (uint16_t)n;
 
-    for (uint16_t i = 0; i < profile->count; i++) {
+    uint16_t idata_limit = rt_idata_row_limit(profile->sensor_level);
+    if (row_limit > idata_limit) {
+        row_limit = idata_limit;
+    }
+
+    for (uint16_t i = 0; i < row_limit; i++) {
         /* Select the active row */
         const measurement_data_t *m = &profile->measurements[i];
 

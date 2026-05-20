@@ -45,10 +45,15 @@ extern "C" {
 #define OPTODE_RX_BUF_SIZE          2048
 #define WIFI_PRINTF_BUF_SIZE         256
 
-/* Number of measurements per recording session */
+/* Number of idata measurements per recording session */
+#define IDATA_CTD_ONLY     315
+#define IDATA_CTD_OPTODE   205
+#define IDATA_CFG_ALL      400
+
+/* Total number of measurements per recording session */
 #define MEASUREMENTS_CTD_ONLY     315
 #define MEASUREMENTS_CTD_OPTODE   205
-#define MEASUREMENTS_CFG_ALL      155
+#define MEASUREMENTS_CFG_ALL      680
 
 /* System operating mode */
 typedef enum {
