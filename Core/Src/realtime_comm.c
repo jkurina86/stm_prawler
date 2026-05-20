@@ -29,7 +29,7 @@ static uint16_t rt_crc;
 static uint8_t data_sent = 1;
 
 /**
- * @brief Fold one byte into the CRC-16/XMODEM accumulator.
+ * @brief Consume one byte into the CRC-16/XMODEM accumulator.
  * @param accum Current widened CRC accumulator.
  * @param ch Input byte to add.
  * @return Updated widened CRC accumulator.
@@ -82,8 +82,8 @@ static uint16_t rt_crc16_xmodem_finish(uint32_t accum)
 /* Public functions ----------------------------------------------------------*/
 
 /**
- * @brief Build the realtime CSV payload and cache its frame metadata.
- * @param profile Normalized profile data to serialize for realtime transfer.
+ * @brief Build the realtime CSV payload and store the preamble data.
+ * @param profile measurements.
  */
 void realtime_comm_build(const profile_data_t *profile)
 {
@@ -186,11 +186,11 @@ void realtime_comm_build(const profile_data_t *profile)
         rows_built++;
     }
 
-    /* Create an ASCII-Encoded hex-length string */
+    /* Create an ASCII-Encoded-hex length string */
     (void)snprintf(len_ascii, sizeof(len_ascii), "%04X", csv_len);
 
-    /* CRC covers the ASCII length field plus CSV payload bytes only. It does
-     * not cover the "@@@" preamble or CRC field. */
+    /* CRC covers the ASCII length field plus CSV payload bytes only.
+     * It does not include the "@@@" preamble or CRC field. */
     crc_accum = rt_crc16_xmodem_update(crc_accum, (const uint8_t *)len_ascii, RT_LEN_ASCII_LEN);
 
     /* Add the CSV data to the CRC. */
@@ -199,14 +199,14 @@ void realtime_comm_build(const profile_data_t *profile)
     /* Finish the CRC calculation */
     rt_crc = rt_crc16_xmodem_finish(crc_accum);
 
-    /* Update the length of the realtime data transfer */
+    /* Update the length of the idata transfer */
     rt_len = csv_len;
 
     shell_printf("[realtime] Built %u rows (%u-byte CSV)\r\n", rows_built, rt_len);
 }
 
 /**
- * @brief Stream the cached realtime payload to the WiFi TCP client.
+ * @brief Stream the cached idata payload to the WiFi TCP client.
  */
 void realtime_comm_stream(void)
 {

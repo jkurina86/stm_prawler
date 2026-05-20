@@ -23,11 +23,8 @@ extern "C" {
 
 /* NORM_SAMPLES mirrors the value in recorder.c. Kept in sync by PROFILE_MAX_MEASUREMENTS. */
 #define PROFILE_NORM_SAMPLES       30
-
-/* Worst-case appended samples: the largest profile cap (CTD-only = 315), plus
- * the normalization phase. The immediate PB8 probe sample is only used for
- * false-start detection and is not appended to the profile. */
-#define PROFILE_MAX_MEASUREMENTS   (MEASUREMENTS_CTD_ONLY + PROFILE_NORM_SAMPLES)
+#define PROFILE_RECORDING_BYTES    (50U * 1024U)
+#define PROFILE_DATA_HEADER_BYTES  8U
 
 typedef struct {
     uint32_t       timestamp;   /* Unix epoch UTC (seconds since Jan 1, 1970) */
@@ -36,12 +33,19 @@ typedef struct {
     wetlab_data_t  wetlab;
 } measurement_data_t;
 
+/* Static profile buffer capacity. Active per-configuration sample caps are
+ * still controlled by MEASUREMENTS_* in config.h. */
+#define PROFILE_MAX_MEASUREMENTS   ((PROFILE_RECORDING_BYTES - PROFILE_DATA_HEADER_BYTES) / sizeof(measurement_data_t))
+
 typedef struct {
     uint16_t            count;
     uint8_t             sensor_level;                         /* SENSOR_CFG_* used for this profile */
     uint32_t            start_epoch;                          /* Unix epoch at PB8 trigger */
     measurement_data_t  measurements[PROFILE_MAX_MEASUREMENTS];
 } profile_data_t;
+
+_Static_assert(sizeof(profile_data_t) == PROFILE_RECORDING_BYTES,
+               "profile_data_t must remain 50 KiB");
 
 #ifdef __cplusplus
 }
