@@ -589,11 +589,28 @@ void handle_optode_listen(const void *arg)
 void handle_wetlab(const void *arg)
 {
     (void)arg;
-    if (!sensor_shell_peripherals_available())
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[wetlab] Command is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
         return;
+    }
+
+    bool already_up = lowpower_profile_peripherals_are_up();
+    if (!already_up) {
+        shell_print("[wetlab] Powering UART sensor interfaces\r\n");
+        lowpower_sensor_interfaces_up();
+    }
 
     wetlab_data_t data;
-    if (wetlab_sample(&data)) {
+    bool ok = wetlab_sample(&data);
+
+    if (!already_up) {
+        lowpower_sensor_interfaces_down();
+        lowpower_enter_idle();
+    }
+
+    if (ok) {
         shell_print("\nWetLab:\r\n");
         shell_printf("  CH1:        %u @ %u nm\r\n",
                      data.ch1_signal, data.ch1_lambda);
@@ -605,15 +622,35 @@ void handle_wetlab(const void *arg)
     } else {
         shell_printf("\nWetLab read failed\r\n");
     }
+
+    if (!already_up) {
+        shell_print("[wetlab] UART sensor interfaces down\r\n");
+    }
 }
 
 void handle_wetlab_raw(const void *arg)
 {
     (void)arg;
-    if (!sensor_shell_peripherals_available())
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[wetlab-raw] Command is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
         return;
+    }
+
+    bool already_up = lowpower_profile_peripherals_are_up();
+    if (!already_up) {
+        shell_print("[wetlab-raw] Powering UART sensor interfaces\r\n");
+        lowpower_sensor_interfaces_up();
+    }
 
     wetlab_raw();
+
+    if (!already_up) {
+        lowpower_sensor_interfaces_down();
+        lowpower_enter_idle();
+        shell_print("[wetlab-raw] UART sensor interfaces down\r\n");
+    }
 }
 
 /* Simultaneous Sampling --------------------------------------------------*/
