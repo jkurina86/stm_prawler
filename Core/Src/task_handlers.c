@@ -425,6 +425,7 @@ void handle_ctd(const void *arg)
     if (!already_up) {
         shell_print("[ctd] Powering UART sensor interfaces\r\n");
         lowpower_sensor_interfaces_up();
+        HAL_Delay(2000);
     }
 
     ctd_data_t data;
@@ -464,6 +465,7 @@ void handle_ctd_raw(const void *arg)
     if (!already_up) {
         shell_print("[ctd-raw] Powering UART sensor interfaces\r\n");
         lowpower_sensor_interfaces_up();
+        HAL_Delay(2000);
     }
 
     static uint8_t raw[CTD_RX_BUF_SIZE];
