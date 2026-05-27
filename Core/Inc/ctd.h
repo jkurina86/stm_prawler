@@ -27,6 +27,7 @@ typedef struct {
 /* Function prototypes -------------------------------------------------------*/
 void ctd_init(UART_HandleTypeDef *huart);
 bool ctd_ts(ctd_data_t *out);
+uint16_t ctd_sample_raw(uint8_t *out, uint16_t max_len);
 
 /* Split fire/collect commands for simultaneous sampling */
 bool ctd_wakeup(void);

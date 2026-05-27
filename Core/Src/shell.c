@@ -71,7 +71,8 @@ const shell_command_t shell_commands[] = {
     {"rtc-timer-status", "Show RTC timer status", cmd_rtc_timer_status},
 
     /* CTD Commands */
-    {"ctd", "Get CTD configuration data", cmd_ctd},
+    {"ctd", "Get CTD sensor data", cmd_ctd},
+    {"ctd-raw", "Dump raw CTD sample response", cmd_ctd_raw},
 
     /* Optode Commands */
     {"optode", "Get Optode sensor data", cmd_optode},
@@ -580,6 +581,12 @@ void cmd_ctd(int argc, char **argv)
 {
     (void)argc; (void)argv;
     tasker_enqueue(handle_ctd, NULL, 0);
+}
+
+void cmd_ctd_raw(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    tasker_enqueue(handle_ctd_raw, NULL, 0);
 }
 
 /* Optode Commands ------------------------------------------------*/

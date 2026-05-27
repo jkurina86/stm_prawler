@@ -414,17 +414,76 @@ void handle_rtc_timer_status(const void *arg)
 void handle_ctd(const void *arg)
 {
     (void)arg;
-    if (!sensor_shell_peripherals_available())
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[ctd] Command is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
         return;
+    }
+
+    bool already_up = lowpower_profile_peripherals_are_up();
+    if (!already_up) {
+        shell_print("[ctd] Powering UART sensor interfaces\r\n");
+        lowpower_sensor_interfaces_up();
+    }
 
     ctd_data_t data;
-    if (ctd_ts(&data)) {
+
+    bool ok = ctd_ts(&data);
+
+    if (!already_up) {
+        lowpower_sensor_interfaces_down();
+        lowpower_enter_idle();
+    }
+
+    if (ok) {
         shell_print("\nCTD Sensor Readings:\r\n");
         shell_printf("Conductivity: %.4f\n", data.conductivity);
         shell_printf("Temperature:  %.4f\n", data.temperature);
         shell_printf("Pressure:     %.5f\r\n", data.pressure);
     } else {
         shell_printf("\nCTD read failed\r\n");
+    }
+
+    if (!already_up) {
+        shell_print("[ctd] UART sensor interfaces down\r\n");
+    }
+}
+
+void handle_ctd_raw(const void *arg)
+{
+    (void)arg;
+
+    if (g_app.mode != SYS_MODE_IDLE) {
+        shell_printf("[ctd-raw] Command is unavailable while mode is %s\r\n",
+                     sys_mode_name(g_app.mode));
+        return;
+    }
+
+    bool already_up = lowpower_profile_peripherals_are_up();
+    if (!already_up) {
+        shell_print("[ctd-raw] Powering UART sensor interfaces\r\n");
+        lowpower_sensor_interfaces_up();
+    }
+
+    static uint8_t raw[CTD_RX_BUF_SIZE];
+    uint16_t len = ctd_sample_raw(raw, sizeof(raw));
+
+    if (!already_up) {
+        lowpower_sensor_interfaces_down();
+        lowpower_enter_idle();
+    }
+
+    if (len > 0) {
+        shell_printf("\r\n[ctd-raw] %u bytes:\r\n", len);
+        shell_print((const char *)raw);
+        shell_print("\r\n");
+    } else {
+        shell_print("\r\n[ctd-raw] No response\r\n");
+    }
+
+    if (!already_up) {
+        shell_print("[ctd-raw] UART sensor interfaces down\r\n");
     }
 }
 

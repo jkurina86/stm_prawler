@@ -124,34 +124,69 @@ static bool ctd_arm_rx(uint8_t *buf, uint16_t len)
     return true;
 }
 
+static bool ctd_parse_response(char *buf, ctd_data_t *out)
+{
+    /* Parse: find the data line, first line containing a comma. */
+    char *line = strtok(buf, "\r\n");
+    while (line) {
+        if (strchr(line, ',')) {
+            char *end;
+            out->pressure = strtof(line, &end);
+            if (*end != ',') {
+                line = strtok(NULL, "\r\n");
+                continue;
+            }
+            out->temperature = strtof(end + 1, &end);
+            if (*end != ',') {
+                line = strtok(NULL, "\r\n");
+                continue;
+            }
+            out->conductivity = strtof(end + 1, &end);
+            return true;
+        }
+        line = strtok(NULL, "\r\n");
+    }
+    return false;
+}
+
 /** @brief  Send the "ts" command to the CTD sensor and parse the response
   * @param  out: Pointer to a ctd_data_t structure to receive the parsed data
   * @retval true if successful, false on error (e.g. timeout, parse failure)
   */
 bool ctd_ts(ctd_data_t *out)
 {
+    uint16_t total = ctd_sample_raw(NULL, 0);
+
+    if (total == 0)
+        return false;
+
+    return ctd_parse_response((char *)rx_buf, out);
+}
+
+uint16_t ctd_sample_raw(uint8_t *out, uint16_t max_len)
+{
     const char *cmd = "ts\r";
     uint32_t t0;
     uint16_t total = 0;
 
     if (!ctd_wakeup())
-        return false;
+        return 0;
 
     /* Arm RX DMA before TX so we don't miss the response */
     if (!ctd_arm_rx(rx_buf, sizeof(rx_buf) - 1))
-        return false;
+        return 0;
 
     /* TX command via DMA */
     tx_done = false;
     if (HAL_UART_Transmit_DMA(ctd_huart, (uint8_t *)cmd, strlen(cmd)) != HAL_OK) {
         HAL_UART_AbortReceive(ctd_huart);
-        return false;
+        return 0;
     }
     t0 = HAL_GetTick();
     while (!tx_done) {
         if ((HAL_GetTick() - t0) > 1000) {
             HAL_UART_Abort(ctd_huart);
-            return false;
+            return 0;
         }
     }
 
@@ -184,26 +219,19 @@ bool ctd_ts(ctd_data_t *out)
     HAL_UART_AbortReceive(ctd_huart);
 
     if (total == 0)
-        return false;
+        return 0;
 
     rx_buf[total] = '\0';
 
-    /* Parse: response contains "ts\r\n  pres, temp, cond\r\nS>" */
-    /* Find the data line — first line containing a comma */
-    char *line = strtok((char *)rx_buf, "\r\n");
-    while (line) {
-        if (strchr(line, ',')) {
-            char *end;
-            out->pressure = strtof(line, &end);
-            if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
-            out->temperature = strtof(end + 1, &end);
-            if (*end != ',') { line = strtok(NULL, "\r\n"); continue; }
-            out->conductivity = strtof(end + 1, &end);
-            return true;
-        }
-        line = strtok(NULL, "\r\n");
+    if (out != NULL && max_len > 0) {
+        uint16_t copy_len = total;
+        if (copy_len >= max_len)
+            copy_len = max_len - 1;
+        memcpy(out, rx_buf, copy_len);
+        out[copy_len] = '\0';
     }
-    return false;
+
+    return total;
 }
 
 bool ctd_fire(void)
@@ -247,26 +275,5 @@ bool ctd_collect(ctd_data_t *out)
 
     rx_buf[total] = '\0';
 
-    /* Parse: find the data line, first line containing a comma */
-    /* Note: Couldn't get this to work with sscanf */
-    char *line = strtok((char *)rx_buf, "\r\n");
-    while (line) {
-        if (strchr(line, ',')) {
-            char *end;
-            out->pressure = strtof(line, &end);
-            if (*end != ',') {
-                line = strtok(NULL, "\r\n");
-                continue;
-            }
-            out->temperature = strtof(end + 1, &end);
-            if (*end != ',') {
-                line = strtok(NULL, "\r\n");
-                continue;
-            }
-            out->conductivity = strtof(end + 1, &end);
-            return true;
-        }
-        line = strtok(NULL, "\r\n");
-    }
-    return false;
+    return ctd_parse_response((char *)rx_buf, out);
 }

@@ -75,6 +75,7 @@ void cmd_rtc_timer_status(int argc, char **argv);
 
 /* CTD Command functions */
 void cmd_ctd(int argc, char **argv);
+void cmd_ctd_raw(int argc, char **argv);
 
 /* Optode Command functions */
 void cmd_optode(int argc, char **argv);

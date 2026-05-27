@@ -62,6 +62,7 @@ void handle_rtc_timer_status(const void *arg);
 
 /* CTD */
 void handle_ctd(const void *arg);
+void handle_ctd_raw(const void *arg);
 
 /* Optode */
 void handle_optode(const void *arg);
