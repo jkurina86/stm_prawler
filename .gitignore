@@ -92,3 +92,4 @@ logs/
 tmpc*
 reports.csv
 Records/
+build/Debug/CMakeCache.txt
