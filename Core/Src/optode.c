@@ -193,7 +193,7 @@ uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
         return 0;
     }
 
-    HAL_Delay(10);
+    HAL_Delay(150);
     HAL_UART_AbortReceive(optode_huart);
     optode_reset_uart();
 
@@ -208,7 +208,7 @@ uint16_t optode_sample_raw(uint8_t *out, uint16_t max_len)
         return 0;
     }
 
-    HAL_Delay(1100);
+    HAL_Delay(1150);
     total = buf_size - __HAL_DMA_GET_COUNTER(optode_huart->hdmarx);
     HAL_UART_AbortReceive(optode_huart);
 
@@ -256,7 +256,7 @@ void optode_wake(void)
         }
     }
 
-    HAL_Delay(10);
+    HAL_Delay(20);
     HAL_UART_AbortReceive(optode_huart);
 }
 
