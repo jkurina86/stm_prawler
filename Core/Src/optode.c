@@ -256,7 +256,7 @@ void optode_wake(void)
         }
     }
 
-    HAL_Delay(50);
+    HAL_Delay(75);
     HAL_UART_AbortReceive(optode_huart);
 }
 
