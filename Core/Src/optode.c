@@ -23,7 +23,7 @@ static volatile bool rx_done = false;
 static volatile uint16_t rx_len = 0;
 static uint8_t rx_buf[OPTODE_RX_BUF_SIZE];
 
-static const char wake_preamble[] = ";;;;;;;;;;\r\n";
+static const char wake_preamble[] = ";;;;;;;;;;\r\n;;;;;;;;;;\r\n";
 
 /* Callback notify functions (called from centralized HAL callbacks) ----------*/
 
@@ -256,7 +256,7 @@ void optode_wake(void)
         }
     }
 
-    HAL_Delay(20);
+    HAL_Delay(250);
     HAL_UART_AbortReceive(optode_huart);
 }
 
