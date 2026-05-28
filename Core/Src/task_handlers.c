@@ -674,6 +674,8 @@ void handle_sensors(const void *arg)
     bool has_optode = config_has_optode();
     bool has_wetlab = config_has_wetlab();
 
+    HAL_Delay(1200);
+
     uint32_t t0 = HAL_GetTick();
     sensor_reading_t reading;
     sensors_sample(&reading);
