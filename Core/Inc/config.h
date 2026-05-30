@@ -48,7 +48,7 @@ extern "C" {
 /* Number of idata measurements per recording session */
 #define IDATA_CTD_ONLY     315
 #define IDATA_CTD_OPTODE   205
-#define IDATA_CFG_ALL      400
+#define IDATA_CFG_ALL      500
 
 /* Total number of measurements per recording session */
 #define MEASUREMENTS_CTD_ONLY     315
