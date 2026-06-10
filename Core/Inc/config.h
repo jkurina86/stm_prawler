@@ -38,7 +38,7 @@ extern "C" {
 #define OPTODE_WAKE_DELAY_MS         500  /* Delay after first (garbled) wake */
 
 /* Device identity */
-#define DEVICE_SERIAL              "PW002"
+#define DEVICE_SERIAL              "PW001"
 
 /* Buffer sizes */
 #define CTD_RX_BUF_SIZE             1024
