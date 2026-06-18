@@ -187,7 +187,7 @@ static int format_measurement_csv(char *buf, size_t buf_size,
     return snprintf(buf, buf_size,
         "%lu,%lu,%f,%f,%f,"
         "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,"
-        "%u,%u,%u,%u,%u,%u,%u\r\n",
+        "%u,%u,%u,%u,%u,%u,%lu\r\n",
         measurement_num, (unsigned long)m->timestamp,
         m->ctd.conductivity, m->ctd.temperature, m->ctd.pressure,
         m->optode.o2_concentration, m->optode.air_saturation,
@@ -198,7 +198,7 @@ static int format_measurement_csv(char *buf, size_t buf_size,
         m->wetlab.ch1_lambda, m->wetlab.ch1_signal,
         m->wetlab.ch2_lambda, m->wetlab.ch2_signal,
         m->wetlab.ch3_lambda, m->wetlab.ch3_signal,
-        m->wetlab.thermistor);
+        (unsigned long)m->wetlab.thermistor);
 }
 
 static bool build_filename(uint32_t start_epoch, char *out, size_t out_size)

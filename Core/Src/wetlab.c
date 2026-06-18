@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define WETLAB_BUF_SIZE   1024
+#define WETLAB_BUF_SIZE   4096
 
 /* Private variables ---------------------------------------------------------*/
 static UART_HandleTypeDef *wetlab_huart;
@@ -104,7 +104,7 @@ static bool wetlab_parse(const char *line, wetlab_data_t *out)
     out->ch2_signal   = (uint16_t)ch2_signal;
     out->ch3_lambda   = (uint16_t)ch3_lambda;
     out->ch3_signal   = (uint16_t)ch3_signal;
-    out->thermistor   = (uint16_t)therm;
+    out->thermistor   = therm;
     return true;
 }
 

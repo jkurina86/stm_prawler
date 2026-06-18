@@ -26,7 +26,7 @@ typedef struct {
     uint16_t ch2_signal;  /* counts — channel 2 */
     uint16_t ch3_lambda; /* nm — channel 3 excitation wavelength */
     uint16_t ch3_signal; /* counts — channel 3 */
-    uint16_t thermistor;
+    uint32_t thermistor;
 } wetlab_data_t;
 
 /* Function prototypes -------------------------------------------------------*/

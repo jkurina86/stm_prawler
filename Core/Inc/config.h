@@ -31,14 +31,14 @@ extern "C" {
 
 /* Timing constants (ms) */
 #define WETLAB_BOOT_MS              1500  /* Power-on to first valid data */
-#define SENSOR_COLLECT_WINDOW_MS    1200  /* DMA collection window after fire */
+#define SENSOR_COLLECT_WINDOW_MS    1500  /* DMA collection window after fire */
 #define WETLAB_SAMPLE_WAIT_MS        900  /* Delay for WetLab blocking sample */
 #define CTD_WAKEUP_TIMEOUT_MS         50  /* Per-attempt RX wait during wakeup */
 #define CTD_WAKEUP_RETRIES            10  /* Max wakeup attempts */
 #define OPTODE_WAKE_DELAY_MS         500  /* Delay after first (garbled) wake */
 
 /* Device identity */
-#define DEVICE_SERIAL              "PW002"
+#define DEVICE_SERIAL              "PW001"
 
 /* Buffer sizes */
 #define CTD_RX_BUF_SIZE             1024
