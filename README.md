@@ -2,13 +2,10 @@
 
 STM32L476 firmware generated from STM32CubeMX and built with CMake.
 
-## Linux build
+## Build
 
-Install the build tools and ARM embedded GCC toolchain:
-
-```sh
-sudo apt install cmake ninja-build gcc-arm-none-eabi
-```
+Download and install the STM32CubeCLT (command-line tools)
+https://www.st.com/en/development-tools/stm32cubeclt.html
 
 Configure and build:
 
@@ -16,8 +13,6 @@ Configure and build:
 cmake --preset Debug
 cmake --build --preset Debug
 ```
-
-The ELF is written to `build/linux/Debug/stm-prawler.elf`.
 
 Release builds use the matching preset:
 
@@ -32,7 +27,3 @@ sure `STM32_Programmer_CLI` is on `PATH`, then run:
 ```sh
 cmake --build --preset Debug --target flash
 ```
-
-The legacy `build/Debug` directory may contain a stale CMake cache generated on
-Windows. The Linux presets intentionally use `build/linux/...` so that caches
-from different operating systems do not conflict.
