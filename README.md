@@ -5,6 +5,7 @@ STM32L476 firmware generated from STM32CubeMX and built with CMake.
 ## Build
 
 Download and install the STM32CubeCLT (command-line tools)
+
 https://www.st.com/en/development-tools/stm32cubeclt.html
 
 Configure and build:
