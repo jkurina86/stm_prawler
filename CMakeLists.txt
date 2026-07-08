@@ -87,3 +87,20 @@ add_custom_target(flash
     DEPENDS ${CMAKE_PROJECT_NAME}
     COMMENT "Flashing ${CMAKE_PROJECT_NAME} via ST-Link"
 )
+
+set(JLINK_DEVICE STM32L476RG CACHE STRING "SEGGER J-Link target device")
+set(JLINK_INTERFACE SWD CACHE STRING "SEGGER J-Link debug interface")
+set(JLINK_SPEED 4000 CACHE STRING "SEGGER J-Link interface speed in kHz")
+set(JLINK_COMMAND_FILE ${CMAKE_CURRENT_BINARY_DIR}/jlink-flash.jlink)
+
+file(GENERATE
+    OUTPUT ${JLINK_COMMAND_FILE}
+    CONTENT "loadfile $<TARGET_FILE:${CMAKE_PROJECT_NAME}>\nr\ng\nq\n"
+)
+
+# Flash target using SEGGER J-Link Commander
+add_custom_target(jlink-flash
+    COMMAND JLinkExe -device ${JLINK_DEVICE} -if ${JLINK_INTERFACE} -speed ${JLINK_SPEED} -autoconnect 1 -CommanderScript ${JLINK_COMMAND_FILE}
+    DEPENDS ${CMAKE_PROJECT_NAME}
+    COMMENT "Flashing ${CMAKE_PROJECT_NAME} via SEGGER J-Link"
+)
