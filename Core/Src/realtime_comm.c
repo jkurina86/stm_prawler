@@ -130,7 +130,7 @@ void realtime_comm_build(const profile_data_t *profile)
     int n;
     if (has_wetlab && has_optode) {
         n = snprintf(csv_buf, csv_capacity,
-                     "EP,CD,CT,CC,OT,O2,CH,TB,CD\n");
+                     "EP,CD,CT,CC,OT,O2,CH,TB,CM\n");
     } else if (!has_wetlab && has_optode) {
         n = snprintf(csv_buf, csv_capacity,
                      "EP,CD,CT,CC,OT,O2\n");
