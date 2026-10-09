@@ -14,3 +14,15 @@ if(ENABLE_SANITIZERS)
 endif()
 enable_testing()
 add_test(NAME li8x0 COMMAND test_li8x0)
+
+add_executable(test_licor_shell test_licor_shell.c
+    ../Core/Src/shell.c ../Core/Src/licor_shell.c ../Core/Src/LI8x0.c
+    ../Core/Src/tasker.c ../Core/Src/config.c)
+target_include_directories(test_licor_shell PRIVATE stubs ../Core/Inc)
+target_compile_options(test_licor_shell PRIVATE -Wall -Wextra -Werror -pedantic -UNDEBUG)
+target_link_libraries(test_licor_shell PRIVATE m)
+if(ENABLE_SANITIZERS)
+    target_compile_options(test_licor_shell PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(test_licor_shell PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME licor_shell COMMAND test_licor_shell)

@@ -26,12 +26,8 @@
 #include "shell.h"
 #include "filesystem.h"
 #include "ab-rtcmc-rtc.h"
-#include "ctd.h"
-#include "optode.h"
-#include "wetlab.h"
-#include "recorder.h"
+#include "LI8x0.h"
 #include "config.h"
-#include "wifi.h"
 #include "lowpower.h"
 /* USER CODE END Includes */
 
@@ -79,12 +75,9 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
-static void MX_UART4_Init(void);
-static void MX_UART5_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_USART3_UART_Init(void);
 static void MX_IWDG_Init(void);
 /* USER CODE BEGIN PFP */
 void transceiver_init(void);
@@ -127,17 +120,14 @@ int main(void)
   MX_DMA_Init();
   MX_SPI1_Init();
   MX_SPI2_Init();
-  MX_UART4_Init();
   MX_FATFS_Init();
-  MX_UART5_Init();
   MX_TIM4_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
-  MX_USART3_UART_Init();
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
 
-  /* Turn off wifi to bring it to a known state */
+  /* Keep the unused truck/WiFi interface off. */
   HAL_GPIO_WritePin(PB9_TRUCK_INT_OUT_GPIO_Port, PB9_TRUCK_INT_OUT_Pin, GPIO_PIN_SET);
 
   shell_printf("\r\nSystem Initialization...\r\n");
@@ -145,7 +135,7 @@ int main(void)
   /* Bring in the Config vars/macros */
   config_init();
 
-  /* Initialize the RS232 transcievers */
+  /* Enable the LI-COR RS232 transceiver only. */
   transceiver_init();
 
   /* Initialize the task scheduler */
@@ -180,35 +170,15 @@ int main(void)
       shell_printf("RTC init failed (err %d)\r\n", rtc_init_status);
   }
 
-  /* Initialize the CTD */
-  ctd_init(&huart3);
-  g_app.ctd_status = PERIPH_READY;
-
-  /* Initialize the optode */
-  optode_init(&huart2);
-  g_app.optode_status = PERIPH_READY;
-
-  /* Initialize the wetlab */
-  wetlab_init(&huart5);
-  g_app.wetlab_status = PERIPH_READY;
-
-  /* Initialize the recorder */
-  recorder_init();
-
-  /* Initialize the low power manager */
-  lowpower_init();
-
-  /* Put the sensors to sleep */
-  lowpower_idle_peripherals_down();
-
-  /* Start the WiFi */
-  lowpower_wifi_start();
+  /* Bind LI-COR to USART2; discover/configure only on a shell request. */
+  li8x0_status_t licor_status = li8x0_init(&huart2, LI8X0_UNKNOWN);
+  g_app.licor_status = licor_status == LI8X0_OK ? PERIPH_READY : PERIPH_ERROR;
+  if (licor_status != LI8X0_OK) {
+      shell_printf("LI-COR UART init failed (err %d)\r\n", licor_status);
+  }
 
   /* Initialize the shell */
   shell_init();
-
-  /* Start the low power idle timer */
-  lowpower_enter_idle();
 
   /* USER CODE END 2 */
 
@@ -223,9 +193,6 @@ int main(void)
     HAL_IWDG_Refresh(&hiwdg);
     shell_task();
     tasker_run();
-    recorder_service();
-    wifi_service();
-    lowpower_service();
   }
   /* USER CODE END 3 */
 }
@@ -428,76 +395,6 @@ static void MX_TIM4_Init(void)
 }
 
 /**
-  * @brief UART4 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_UART4_Init(void)
-{
-
-  /* USER CODE BEGIN UART4_Init 0 */
-
-  /* USER CODE END UART4_Init 0 */
-
-  /* USER CODE BEGIN UART4_Init 1 */
-
-  /* USER CODE END UART4_Init 1 */
-  huart4.Instance = UART4;
-  huart4.Init.BaudRate = 9600;
-  huart4.Init.WordLength = UART_WORDLENGTH_8B;
-  huart4.Init.StopBits = UART_STOPBITS_1;
-  huart4.Init.Parity = UART_PARITY_NONE;
-  huart4.Init.Mode = UART_MODE_TX_RX;
-  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart4.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN UART4_Init 2 */
-
-  /* USER CODE END UART4_Init 2 */
-
-}
-
-/**
-  * @brief UART5 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_UART5_Init(void)
-{
-
-  /* USER CODE BEGIN UART5_Init 0 */
-
-  /* USER CODE END UART5_Init 0 */
-
-  /* USER CODE BEGIN UART5_Init 1 */
-
-  /* USER CODE END UART5_Init 1 */
-  huart5.Instance = UART5;
-  huart5.Init.BaudRate = 19200;
-  huart5.Init.WordLength = UART_WORDLENGTH_8B;
-  huart5.Init.StopBits = UART_STOPBITS_1;
-  huart5.Init.Parity = UART_PARITY_NONE;
-  huart5.Init.Mode = UART_MODE_TX_RX;
-  huart5.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart5.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart5.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart5.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart5) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN UART5_Init 2 */
-
-  /* USER CODE END UART5_Init 2 */
-
-}
-
-/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -564,41 +461,6 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
-
-}
-
-/**
-  * @brief USART3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART3_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART3_Init 0 */
-
-  /* USER CODE END USART3_Init 0 */
-
-  /* USER CODE BEGIN USART3_Init 1 */
-
-  /* USER CODE END USART3_Init 1 */
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 9600;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART3_Init 2 */
-
-  /* USER CODE END USART3_Init 2 */
 
 }
 
@@ -731,18 +593,9 @@ void transceiver_init(void) {
   /* Set PB1 GPIO high - ENABLE pin for USART2 RS232 transceiver */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
 
-  /* Set PB0 GPIO high - ENABLE pin for the USART3 RS232 transceiver */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-
-  /* Set PB4 GPIO high and PB5 GPIO low to enable the UART5 RS232 transceiver */
-  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-  /* Keep PB4 and PB5 low to disable the UART5 RS232 transceiver */
-  /* Wetlab toggles PB4 to take a sample */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
-
-  /* Set PB11 GPIO high to enable the TRUCK_COM Transceiver */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11, GPIO_PIN_SET);
+  /* Disable USART3, UART5 auxiliary selection and the truck interface. */
+  HAL_GPIO_WritePin(GPIOB, PB0_USART3_EN_Pin | PB4_AUX_SEL_A0_Pin |
+                   PB5_AUX_SEL_A1_Pin | GPIO_PIN_11, GPIO_PIN_RESET);
 }
 
 /* USER CODE END 4 */

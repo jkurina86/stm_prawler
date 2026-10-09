@@ -13,53 +13,16 @@
 #include "tasker.h"
 #include "filesystem.h"
 #include "ab-rtcmc-rtc.h"
-#include "sensors.h"
 #include "config.h"
-#include "wifi.h"
-#include "realtime_comm.h"
 #include "lowpower.h"
 #include "sd_spi.h"
+#include "LI8x0.h"
 #include <string.h>
-
-/* External UART handles declared in main.c */
-extern UART_HandleTypeDef huart1;
-extern UART_HandleTypeDef huart2;
-extern UART_HandleTypeDef huart3;
-extern UART_HandleTypeDef huart4;
-extern UART_HandleTypeDef huart5;
 
 /* Firmware version */
 #define FW_VERSION "0.1.0"
 
 /* General Handlers -------------------------------------------------------*/
-
-static const char *sys_mode_name(sys_mode_t mode)
-{
-    switch (mode) {
-    case SYS_MODE_IDLE:
-        return "IDLE";
-    case SYS_MODE_RECORDING:
-        return "RECORDING";
-    case SYS_MODE_FALSE_START:
-        return "FALSE_START";
-    case SYS_MODE_TIMEOUT:
-        return "TIMEOUT";
-    case SYS_MODE_NORMALIZING:
-        return "NORMALIZING";
-    default:
-        return "UNKNOWN";
-    }
-}
-
-static bool sensor_shell_peripherals_available(void)
-{
-    if (lowpower_profile_peripherals_are_up()) {
-        return true;
-    }
-
-    shell_print("[power] Sensor peripherals are off in idle; PB8 profile start owns sensor power\r\n");
-    return false;
-}
 
 static void print_sd_diag(void)
 {
@@ -112,72 +75,18 @@ void handle_status(const void *arg)
 {
     (void)arg;
     static const char *periph_names[] = {"OFF", "READY", "ERROR"};
-    static const char *wifi_names[]   = {"OFF", "INIT", "STREAMING", "ERROR"};
 
-    shell_printf("Mode:       %s\r\n", sys_mode_name(g_app.mode));
-    shell_printf("Uptime:     %lu ms\r\n", HAL_GetTick());
+    shell_print("Mode:       SHELL\r\n");
+    shell_printf("Uptime:     %lu ms\r\n", (unsigned long)HAL_GetTick());
     shell_printf("Tasks:      %u pending\r\n", tasker_pending_count());
     shell_printf("SD/FS:      %s\r\n", periph_names[g_app.sd_status]);
     shell_printf("RTC:        %s\r\n", periph_names[g_app.rtc_status]);
-    shell_printf("CTD:        %s\r\n", periph_names[g_app.ctd_status]);
-    shell_printf("Optode:     %s\r\n", periph_names[g_app.optode_status]);
-    shell_printf("WetLab:     %s\r\n", periph_names[g_app.wetlab_status]);
-    shell_printf("WiFi:       %s\r\n", wifi_names[g_app.wifi_state]);
-    shell_printf("Sensors:    level %u\r\n", g_app.sensor_level);
-    shell_printf("Samplerate: %lu ms\r\n", (unsigned long)config_get_samplerate_ms());
-}
-
-void handle_lowpower(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[lowpower] Sleep is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        shell_print(SHELL_PROMPT);
-        return;
-    }
-
-    if (!lowpower_request_on()) {
-        shell_print("[lowpower] Sleep request already pending\r\n");
-        shell_print(SHELL_PROMPT);
-        return;
-    }
-
-    shell_print("[lowpower] Forced sleep requested\r\n");
-}
-
-void handle_stayawake(const void *arg)
-{
-    (void)arg;
-    lowpower_stay_awake();
-    shell_print("[lowpower] Automatic sleep timer disabled\r\n");
-    shell_print(SHELL_PROMPT);
-}
-
-void handle_debug_mode(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[debug] Debug mode is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        shell_print(SHELL_PROMPT);
-        return;
-    }
-
-    lowpower_stay_awake();
-    lowpower_profile_peripherals_up();
-    shell_print("[debug] Automatic sleep timer disabled; sensor interfaces powered\r\n");
-    shell_print(SHELL_PROMPT);
-}
-
-void handle_lowpower_timer(const void *arg)
-{
-    (void)arg;
-    lowpower_restart_timer();
-    shell_print("[lowpower] Automatic sleep timer restarted (60 s)\r\n");
-    shell_print(SHELL_PROMPT);
+    shell_printf("LI-COR:     %s (USART2, 9600 8N1)\r\n", periph_names[g_app.licor_status]);
+    li8x0_model_t model = li8x0_get_model();
+    if (model == LI8X0_UNKNOWN)
+        shell_print("LI-COR model: undiscovered\r\n");
+    else
+        shell_printf("LI-COR model: LI-%u\r\n", (unsigned)model);
 }
 
 /** @brief  Handle the "version" command
@@ -405,362 +314,6 @@ void handle_rtc_timer_status(const void *arg)
     }
 }
 
-/* CTD Handlers -----------------------------------------------------------*/
-
-/** @brief  Handle CTD sensor readings
-  * @param  arg: Pointer to arguments (not used)
-  * @retval None
-  */
-void handle_ctd(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[ctd] Command is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        return;
-    }
-
-    bool already_up = lowpower_profile_peripherals_are_up();
-    if (!already_up) {
-        shell_print("[ctd] Powering UART sensor interfaces\r\n");
-        lowpower_sensor_interfaces_up();
-        HAL_Delay(2000);
-    }
-
-    ctd_data_t data;
-
-    bool ok = ctd_ts(&data);
-
-    if (!already_up) {
-        lowpower_sensor_interfaces_down();
-        lowpower_enter_idle();
-    }
-
-    if (ok) {
-        shell_print("\nCTD Sensor Readings:\r\n");
-        shell_printf("Conductivity: %.4f\n", data.conductivity);
-        shell_printf("Temperature:  %.4f\n", data.temperature);
-        shell_printf("Pressure:     %.5f\r\n", data.pressure);
-    } else {
-        shell_printf("\nCTD read failed\r\n");
-    }
-
-    if (!already_up) {
-        shell_print("[ctd] UART sensor interfaces down\r\n");
-    }
-}
-
-void handle_ctd_raw(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[ctd-raw] Command is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        return;
-    }
-
-    bool already_up = lowpower_profile_peripherals_are_up();
-    if (!already_up) {
-        shell_print("[ctd-raw] Powering UART sensor interfaces\r\n");
-        lowpower_sensor_interfaces_up();
-        HAL_Delay(2000);
-    }
-
-    static uint8_t raw[CTD_RX_BUF_SIZE];
-    uint16_t len = ctd_sample_raw(raw, sizeof(raw));
-
-    if (!already_up) {
-        lowpower_sensor_interfaces_down();
-        lowpower_enter_idle();
-    }
-
-    if (len > 0) {
-        shell_printf("\r\n[ctd-raw] %u bytes:\r\n", len);
-        shell_print((const char *)raw);
-        shell_print("\r\n");
-    } else {
-        shell_print("\r\n[ctd-raw] No response\r\n");
-    }
-
-    if (!already_up) {
-        shell_print("[ctd-raw] UART sensor interfaces down\r\n");
-    }
-}
-
-/* Optode Handlers --------------------------------------------------------*/
-
-void handle_optode(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[optode] Command is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        return;
-    }
-
-    bool already_up = lowpower_profile_peripherals_are_up();
-    if (!already_up) {
-        shell_print("[optode] Powering UART sensor interfaces\r\n");
-        lowpower_sensor_interfaces_up();
-    }
-
-    HAL_Delay(2000);
-    optode_data_t data;
-    bool ok = optode_sample(&data);
-
-    if (!already_up) {
-        lowpower_sensor_interfaces_down();
-        lowpower_enter_idle();
-    }
-
-    if (ok) {
-        shell_printf("\nOptode:\r\n");
-        shell_printf("O2 Concentration: %.3f uM\r\n", data.o2_concentration);
-        shell_printf("Air Saturation:   %.3f %%\r\n", data.air_saturation);
-        shell_printf("Temperature:      %.3f C\r\n", data.temperature);
-        shell_printf("CalPhase:         %.3f deg\r\n", data.cal_phase);
-        shell_printf("TCPhase:          %.3f deg\r\n", data.tc_phase);
-        shell_printf("C1RPh:            %.3f deg\r\n", data.c1_rph);
-        shell_printf("C2RPh:            %.3f deg\r\n", data.c2_rph);
-        shell_printf("C1Amp:            %.1f mV\r\n", data.c1_amp);
-        shell_printf("C2Amp:            %.1f mV\r\n", data.c2_amp);
-        shell_printf("RawTemp:          %.1f mV\r\n", data.raw_temp);
-    } else {
-        shell_printf("\nOptode read failed\r\n");
-    }
-
-    if (!already_up) {
-        shell_print("[optode] UART sensor interfaces down\r\n");
-    }
-}
-
-void handle_optode_raw(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[optode-raw] Command is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        return;
-    }
-
-    bool already_up = lowpower_profile_peripherals_are_up();
-    if (!already_up) {
-        shell_print("[optode-raw] Powering UART sensor interfaces\r\n");
-        lowpower_sensor_interfaces_up();
-        HAL_Delay(1300);
-    }
-
-    static uint8_t raw[OPTODE_RX_BUF_SIZE];
-    uint16_t len = optode_sample_raw(raw, sizeof(raw));
-
-    if (!already_up) {
-        lowpower_sensor_interfaces_down();
-        lowpower_enter_idle();
-    }
-
-    if (len > 0) {
-        shell_printf("\r\n[optode-raw] %u bytes:\r\n", len);
-        shell_print((const char *)raw);
-        shell_print("\r\n");
-    } else {
-        shell_print("\r\n[optode-raw] No response\r\n");
-    }
-
-    if (!already_up) {
-        shell_print("[optode-raw] UART sensor interfaces down\r\n");
-    }
-}
-
-void handle_optode_listen(const void *arg)
-{
-    (void)arg;
-    if (!sensor_shell_peripherals_available())
-        return;
-
-    optode_listen();
-}
-
-/* WetLab Handlers --------------------------------------------------------*/
-
-void handle_wetlab(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[wetlab] Command is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        return;
-    }
-
-    bool already_up = lowpower_profile_peripherals_are_up();
-    if (!already_up) {
-        shell_print("[wetlab] Powering UART sensor interfaces\r\n");
-        lowpower_sensor_interfaces_up();
-    }
-
-    wetlab_data_t data;
-    bool ok = wetlab_sample(&data);
-
-    if (!already_up) {
-        lowpower_sensor_interfaces_down();
-        lowpower_enter_idle();
-    }
-
-    if (ok) {
-        shell_print("\nWetLab:\r\n");
-        shell_printf("  CH1:        %u @ %u nm\r\n",
-                     data.ch1_signal, data.ch1_lambda);
-        shell_printf("  CH2:        %u @ %u nm\r\n",
-                     data.ch2_signal, data.ch2_lambda);
-        shell_printf("  CH3:       %u @ %u nm\r\n",
-                     data.ch3_signal, data.ch3_lambda);
-        shell_printf("  Thermistor: %lu\r\n", (unsigned long)data.thermistor);
-    } else {
-        shell_printf("\nWetLab read failed\r\n");
-    }
-
-    if (!already_up) {
-        shell_print("[wetlab] UART sensor interfaces down\r\n");
-    }
-}
-
-void handle_wetlab_raw(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[wetlab-raw] Command is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        return;
-    }
-
-    bool already_up = lowpower_profile_peripherals_are_up();
-    if (!already_up) {
-        shell_print("[wetlab-raw] Powering UART sensor interfaces\r\n");
-        lowpower_sensor_interfaces_up();
-    }
-
-    wetlab_raw();
-
-    if (!already_up) {
-        lowpower_sensor_interfaces_down();
-        lowpower_enter_idle();
-        shell_print("[wetlab-raw] UART sensor interfaces down\r\n");
-    }
-}
-
-/* Simultaneous Sampling --------------------------------------------------*/
-
-void handle_sensors(const void *arg)
-{
-    (void)arg;
-
-    if (g_app.mode != SYS_MODE_IDLE) {
-        shell_printf("[sensors] Command is unavailable while mode is %s\r\n",
-                     sys_mode_name(g_app.mode));
-        return;
-    }
-
-    bool already_up = lowpower_profile_peripherals_are_up();
-    if (!already_up) {
-        shell_print("[sensors] Powering UART sensor interfaces\r\n");
-        lowpower_sensor_interfaces_up();
-    }
-
-    bool has_optode = config_has_optode();
-    bool has_wetlab = config_has_wetlab();
-
-    HAL_Delay(1200);
-
-    uint32_t t0 = HAL_GetTick();
-    sensor_reading_t reading;
-    sensors_sample(&reading);
-    uint32_t elapsed = HAL_GetTick() - t0;
-
-    if (!already_up) {
-        lowpower_sensor_interfaces_down();
-        lowpower_enter_idle();
-    }
-
-    shell_printf("[sensors] Time elapsed: %lu ms\r\n", elapsed);
-
-    if (reading.ctd_ok) {
-        shell_printf("[CTD] C=%.4f T=%.4f P=%.5f\r\n",
-                     reading.ctd.conductivity, reading.ctd.temperature,
-                     reading.ctd.pressure);
-    } else {
-        shell_print("[CTD] FAILED\r\n");
-    }
-
-    if (has_optode) {
-        if (reading.optode_ok) {
-            shell_printf("[Optode] O2=%.3f uM  AirSat=%.3f %%  T=%.3f C  CalPh=%.3f\r\n",
-                          reading.optode.o2_concentration,
-                          reading.optode.air_saturation,
-                          reading.optode.temperature,
-                          reading.optode.cal_phase);
-        } else {
-            shell_print("[Optode] FAILED\r\n");
-        }
-    }
-
-    if (has_wetlab) {
-        if (reading.wetlab_ok) {
-            shell_printf("[WetLab] CH1=%u@%unm  CH2=%u@%unm  CH3=%u@%unm  Therm=%lu\r\n",
-                         reading.wetlab.ch1_signal, reading.wetlab.ch1_lambda,
-                         reading.wetlab.ch2_signal, reading.wetlab.ch2_lambda,
-                         reading.wetlab.ch3_signal, reading.wetlab.ch3_lambda,
-                         (unsigned long)reading.wetlab.thermistor);
-        } else {
-            shell_print("[WetLab] FAILED\r\n");
-        }
-    }
-
-    if (!already_up) {
-        shell_print("[sensors] UART sensor interfaces down\r\n");
-    }
-}
-
-/* Config Handlers --------------------------------------------------------*/
-
-void handle_config(const void *arg)
-{
-    const config_args_t *a = (const config_args_t *)arg;
-
-    if (a->set) {
-        config_set_sensor_level(a->level);
-        shell_printf("Sensor config set to %u\r\n", config_get_sensor_level());
-    } else {
-        uint8_t lvl = config_get_sensor_level();
-        shell_printf("Sensor config: %u", lvl);
-        switch (lvl) {
-            case SENSOR_CFG_CTD_ONLY:   shell_print(" (CTD only)\r\n"); break;
-            case SENSOR_CFG_CTD_OPTODE: shell_print(" (CTD + Optode)\r\n"); break;
-            case SENSOR_CFG_ALL:        shell_print(" (CTD + Optode + WetLab)\r\n"); break;
-            default:                    shell_print(" (unknown)\r\n"); break;
-        }
-    }
-}
-
-void handle_samplerate(const void *arg)
-{
-    uint32_t samplerate_ms = *(const uint32_t *)arg;
-
-    if (samplerate_ms != 0U) {
-        samplerate_ms = config_set_samplerate_ms(samplerate_ms);
-        shell_printf("Samplerate set to %lu ms\r\n", (unsigned long)samplerate_ms);
-    } else {
-        samplerate_ms = config_get_samplerate_ms();
-        shell_printf("Samplerate: %lu ms\r\n", (unsigned long)samplerate_ms);
-    }
-
-    shell_print(SHELL_PROMPT);
-}
-
 /* File System Handlers ---------------------------------------------------*/
 
 /** @brief  Handle the "fs-mount" command
@@ -770,11 +323,6 @@ void handle_samplerate(const void *arg)
 void handle_fs_mount(const void *arg)
 {
     (void)arg;
-
-    if (lowpower_profile_peripherals_are_up()) {
-        shell_print("[fs] SD access is unavailable during a profile\r\n");
-        return;
-    }
 
     lowpower_sd_spi_up();
     FS_Result_t res = filesystem_mount();
@@ -831,11 +379,6 @@ void handle_fs_unmount(const void *arg)
 void handle_fs_ls(const void *arg)
 {
     (void)arg;
-    if (lowpower_profile_peripherals_are_up()) {
-        shell_print("[fs] SD access is unavailable during a profile\r\n");
-        return;
-    }
-
     lowpower_sd_spi_up();
     FS_Result_t res = filesystem_mount();
     if (res != FS_OK && res != FS_ALREADY_MOUNTED) {
@@ -857,62 +400,9 @@ void handle_fs_ls(const void *arg)
     lowpower_sd_spi_down();
 }
 
-/* WiFi Handlers ----------------------------------------------------------*/
-
-void handle_wifi_status(const void *arg)
-{
-    (void)arg;
-    static const char *state_names[] = {
-        "OFF", "INIT", "STREAMING", "ERROR"
-    };
-    wifi_state_t st = wifi_get_state();
-    shell_printf("WiFi state: %s (rx buf: %u, rx total: %lu)\r\n",
-                 state_names[st], wifi_available(), wifi_get_rx_count());
-}
-
-void handle_wifi_up(const void *arg)
-{
-    (void)arg;
-    if (lowpower_profile_peripherals_are_up()) {
-        shell_print("[wifi] WiFi is held down during profile acquisition\r\n");
-        return;
-    }
-
-    wifi_state_t state = wifi_get_state();
-    if (state == WIFI_STATE_STREAMING) {
-        shell_print("[wifi] Already up — state: STREAMING\r\n");
-        return;
-    }
-
-    if (state != WIFI_STATE_OFF) {
-        lowpower_wifi_stop();
-    }
-
-    shell_print("[wifi] Powering up...\r\n");
-    lowpower_wifi_start();
-    shell_printf("[wifi] Done — state: %s\r\n",
-                 wifi_get_state() == WIFI_STATE_STREAMING ? "STREAMING" : "ERROR");
-}
-
-void handle_wifi_down(const void *arg)
-{
-    (void)arg;
-    shell_print("[wifi] Powering down...\r\n");
-    lowpower_wifi_stop();
-    shell_print("[wifi] Done — state: OFF\r\n");
-}
-
-void handle_idata(const void *arg)
-{
-    (void)arg;
-    realtime_comm_stream();
-}
-
+/* Report identity on the UART shell. */
 void handle_who(const void *arg)
 {
     (void)arg;
-    wifi_printf("%s\r\n", DEVICE_SERIAL);
-    wifi_prompt();
     shell_printf("%s\r\n", DEVICE_SERIAL);
-    shell_print(SHELL_PROMPT);
 }

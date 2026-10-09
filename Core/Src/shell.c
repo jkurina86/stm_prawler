@@ -11,8 +11,7 @@
 #include "main.h"
 #include "tasker.h"
 #include "task_handlers.h"
-#include "config.h"
-#include "lowpower.h"
+#include "licor_shell.h"
 #include <stdarg.h>
 
 extern UART_HandleTypeDef huart1;
@@ -20,12 +19,11 @@ extern UART_HandleTypeDef huart1;
 /* Private variables ---------------------------------------------------------*/
 static char shell_buffer[SHELL_MAX_CMD_LEN];
 static uint16_t shell_buffer_pos = 0;
+static bool shell_buffer_overflow;
 static uint8_t shell_rx_char;
-static bool shell_prompt_deferred;
-static bool shell_dispatch_from_wifi;
 
 /* Non-blocking ISR to main RX ring buffer */
-#define SHELL_RX_RING_SIZE 128
+#define SHELL_RX_RING_SIZE 256
 static volatile uint8_t shell_rx_ring[SHELL_RX_RING_SIZE];
 static volatile uint16_t shell_rx_head = 0;
 static volatile uint16_t shell_rx_tail = 0;
@@ -53,10 +51,6 @@ const shell_command_t shell_commands[] = {
     {"help", "Display available commands", cmd_help},
     {"clear", "Clear terminal screen", cmd_clear},
     {"status", "Show system status", cmd_status},
-    {"lowpower", "Force low-power sleep mode", cmd_lowpower},
-    {"stayawake", "Disable automatic low-power timer", cmd_stayawake},
-    {"debug-mode", "Disable sleep and power sensor interfaces", cmd_debug_mode},
-    {"lowpower-timer", "Restart automatic low-power timer", cmd_lowpower_timer},
     {"pb8", "Show PB8 pin state", cmd_pb8},
     {"version", "Show firmware version", cmd_version},
 
@@ -70,38 +64,23 @@ const shell_command_t shell_commands[] = {
     {"rtc-timer-stop", "Stop RTC timer", cmd_rtc_timer_stop},
     {"rtc-timer-status", "Show RTC timer status", cmd_rtc_timer_status},
 
-    /* CTD Commands */
-    {"ctd", "Get CTD sensor data", cmd_ctd},
-    {"ctd-raw", "Dump raw CTD sample response", cmd_ctd_raw},
-
-    /* Optode Commands */
-    {"optode", "Get Optode sensor data", cmd_optode},
-    {"optode-raw", "Dump raw Optode sample response", cmd_optode_raw},
-    {"optode-listen", "Power-cycle optode and listen", cmd_optode_listen},
-
-    /* WetLab Commands */
-    {"wetlab", "Get WetLab sensor data", cmd_wetlab},
-    {"wetlab-raw", "Dump raw WetLab output (4s)", cmd_wetlab_raw},
-
-    /* Simultaneous Sampling */
-    {"sensors", "Sample all sensors simultaneously", cmd_sensors},
-
-    /* Config */
-    {"config", "Get/set sensor config (1-3)", cmd_config},
-    {"samplerate", "Get/set sample interval seconds (4-60)", cmd_samplerate},
+    /* LI-COR commands execute in shell_task's foreground context. */
+    {"licor", "Read LI-COR measurements", cmd_licor},
+    {"licor-raw", "Query LI-COR data as XML", cmd_licor_raw},
+    {"licor-info", "Read LI-COR identity", cmd_licor_info},
+    {"licor-discover", "Discover LI-COR model", cmd_licor_discover},
+    {"licor-model", "Get/set model (820/830/840/850)", cmd_licor_model},
+    {"licor-configure", "Configure polled XML measurements", cmd_licor_configure},
+    {"licor-query", "Query XML section (default full state)", cmd_licor_query},
+    {"licor-set", "Set section field [subfield] value", cmd_licor_set},
+    {"licor-heater", "Set heater on/off", cmd_licor_heater},
+    {"licor-resync", "Drain RX after recovery [0-5000 ms]", cmd_licor_resync},
 
     /* File System Commands */
     {"fs-mount", "Mount the file system", cmd_fs_mount},
     {"fs-unmount", "Unmount the file system", cmd_fs_unmount},
     {"fs-ls", "List directory contents", cmd_fs_ls},
 
-    /* WiFi Commands */
-    {"wifi-status", "Show WiFi module state", cmd_wifi_status},
-    {"wifi-up", "Power on and initialize WiFi module", cmd_wifi_up},
-    {"wifi-down", "Power off WiFi module", cmd_wifi_down},
-
-    /* Realtime Commands */
-    {"idata", "Stream last recording over WiFi", cmd_idata},
     {"who", "Report device serial number", cmd_who},
 
     {NULL, NULL, NULL} /* End marker */
@@ -113,20 +92,22 @@ static int shell_parse_command(char *cmd_line, char **argv);
 
 /**
  * @brief  Public command dispatch -- parses and executes a command string.
- * @note   Used by the WiFi shell to reuse the UART shell's command table.
+ * @note   Dispatch a foreground command string using the UART command table.
  *         Returns false for unknown commands (unlike the UART shell which
  *         prints an error).  The caller's buffer is modified by strtok.
  * @retval true if command was found and executed, false otherwise.
  */
 bool shell_dispatch(char *cmd_line)
 {
-    bool previous_dispatch_from_wifi = shell_dispatch_from_wifi;
     bool found = false;
     char *argv[SHELL_MAX_ARGS];
 
-    shell_dispatch_from_wifi = true;
-
     int argc = shell_parse_command(cmd_line, argv);
+    if (argc < 0) {
+        shell_print("Too many arguments\r\n");
+        found = true;
+        goto done;
+    }
     if (argc == 0) {
         found = true;  /* empty line is not an error */
         goto done;
@@ -141,14 +122,7 @@ bool shell_dispatch(char *cmd_line)
     }
 
 done:
-    shell_dispatch_from_wifi = previous_dispatch_from_wifi;
     return found;
-}
-
-void shell_defer_prompt(void)
-{
-    if (!shell_dispatch_from_wifi)
-        shell_prompt_deferred = true;
 }
 
 void shell_resume_rx(void)
@@ -172,6 +146,7 @@ void shell_init(void)
     /* Clear buffers */
     memset(shell_buffer, 0, sizeof(shell_buffer));
     shell_buffer_pos = 0;
+    shell_buffer_overflow = false;
 
     /* Start UART reception in interrupt-mode (HAL) */
     shell_resume_rx();
@@ -198,16 +173,18 @@ void shell_process_char(uint8_t ch)
         case SHELL_CHAR_LF:
             shell_print("\r\n");
             /* Execute command and reset the buffer if there's something contained in the buffer. */
-            if (shell_buffer_pos > 0) {
+            if (shell_buffer_overflow) {
+                shell_print("Command too long; discarded\r\n");
+                shell_buffer_pos = 0;
+                shell_buffer_overflow = false;
+                memset(shell_buffer, 0, sizeof(shell_buffer));
+            } else if (shell_buffer_pos > 0) {
                 shell_buffer[shell_buffer_pos] = '\0'; /* Null-terminate the string. */
                 shell_execute_command(shell_buffer);
                 shell_buffer_pos = 0;
                 memset(shell_buffer, 0, sizeof(shell_buffer)); /* Zeros the char buffer in memory. */
             }
-            if (shell_prompt_deferred)
-                shell_prompt_deferred = false;
-            else
-                shell_print(SHELL_PROMPT);
+            shell_print(SHELL_PROMPT);
             break;
 
         /* Backspace/Delete */
@@ -229,8 +206,12 @@ void shell_process_char(uint8_t ch)
 
         default:
             /* Regular character */
-            if (ch >= 32 && ch <= 126 /* ASCII chars, from space=32 to ~=126 */
-            		&& shell_buffer_pos < (SHELL_MAX_CMD_LEN - 1)) {
+            if (ch >= 32 && ch <= 126) {
+                if (shell_buffer_overflow) break;
+                if (shell_buffer_pos >= SHELL_MAX_CMD_LEN - 1) {
+                    shell_buffer_overflow = true;
+                    break;
+                }
                 /* Put the received ASCII char into the shell buffer */
             	shell_buffer[shell_buffer_pos++] = ch;
                 /* Echo character. */
@@ -297,6 +278,10 @@ static void shell_execute_command(char *cmd_line)
     char *argv[SHELL_MAX_ARGS];
     int argc = shell_parse_command(cmd_line, argv);
 
+    if (argc < 0) {
+        shell_print("Too many arguments\r\n");
+        return;
+    }
     if (argc == 0) {
         return;
     }
@@ -331,7 +316,7 @@ static int shell_parse_command(char *cmd_line, char **argv)
         token = strtok(NULL, " ");
     }
 
-    return argc;
+    return token != NULL ? -1 : argc;
 }
 
 /* General Commands ------------------------------------------*/
@@ -364,47 +349,6 @@ void cmd_status(int argc, char **argv)
 {
     (void)argc; (void)argv; /* Unused args */
     tasker_enqueue(handle_status, NULL, 0);
-}
-
-void cmd_lowpower(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-
-    shell_defer_prompt();
-    if (!tasker_enqueue(handle_lowpower, NULL, 0)) {
-        shell_print("Task queue full\r\n");
-        shell_print(SHELL_PROMPT);
-    }
-}
-
-void cmd_stayawake(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    shell_defer_prompt();
-    if (!tasker_enqueue(handle_stayawake, NULL, 0)) {
-        shell_print("Task queue full\r\n");
-        shell_print(SHELL_PROMPT);
-    }
-}
-
-void cmd_debug_mode(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    shell_defer_prompt();
-    if (!tasker_enqueue(handle_debug_mode, NULL, 0)) {
-        shell_print("Task queue full\r\n");
-        shell_print(SHELL_PROMPT);
-    }
-}
-
-void cmd_lowpower_timer(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    shell_defer_prompt();
-    if (!tasker_enqueue(handle_lowpower_timer, NULL, 0)) {
-        shell_print("Task queue full\r\n");
-        shell_print(SHELL_PROMPT);
-    }
 }
 
 void cmd_pb8(int argc, char **argv)
@@ -575,130 +519,10 @@ void cmd_fs_ls(int argc, char **argv)
     tasker_enqueue(handle_fs_ls, NULL, 0);
 }
 
-/* CTD Commands ---------------------------------------------------*/
-
-void cmd_ctd(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_ctd, NULL, 0);
-}
-
-void cmd_ctd_raw(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_ctd_raw, NULL, 0);
-}
-
-/* Optode Commands ------------------------------------------------*/
-
-void cmd_optode(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_optode, NULL, 0);
-}
-
-void cmd_optode_raw(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_optode_raw, NULL, 0);
-}
-
-void cmd_optode_listen(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_optode_listen, NULL, 0);
-}
-
-/* WetLab Commands ------------------------------------------------*/
-
-void cmd_wetlab(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wetlab, NULL, 0);
-}
-
-void cmd_wetlab_raw(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wetlab_raw, NULL, 0);
-}
-
-/* Simultaneous Sampling ------------------------------------------*/
-
-void cmd_sensors(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_sensors, NULL, 0);
-}
-
-/* Config Commands ------------------------------------------------*/
-
-void cmd_config(int argc, char **argv)
-{
-    config_args_t args = {0};
-
-    if (argc >= 2) {
-        args.level = (uint8_t)atoi(argv[1]);
-        args.set = 1;
-    }
-
-    tasker_enqueue(handle_config, &args, sizeof(args));
-}
-
-void cmd_samplerate(int argc, char **argv)
-{
-    uint32_t samplerate_ms = 0;
-
-    if (argc >= 2) {
-        int seconds = atoi(argv[1]);
-        if (seconds < (int)SAMPLE_RATE_MIN_SECONDS) {
-            seconds = (int)SAMPLE_RATE_MIN_SECONDS;
-        } else if (seconds > (int)SAMPLE_RATE_MAX_SECONDS) {
-            seconds = (int)SAMPLE_RATE_MAX_SECONDS;
-        }
-
-        samplerate_ms = (uint32_t)seconds * 1000UL;
-    }
-
-    shell_defer_prompt();
-    if (!tasker_enqueue(handle_samplerate, &samplerate_ms, sizeof(samplerate_ms))) {
-        shell_print("Task queue full\r\n");
-        shell_print(SHELL_PROMPT);
-    }
-}
-
-/* WiFi Commands ---------------------------------------------------*/
-
-void cmd_wifi_status(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_status, NULL, 0);
-}
-
-void cmd_wifi_up(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_up, NULL, 0);
-}
-
-void cmd_wifi_down(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    tasker_enqueue(handle_wifi_down, NULL, 0);
-}
-
-void cmd_idata(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    shell_defer_prompt();
-    tasker_enqueue(handle_idata, NULL, 0);
-}
-
 void cmd_who(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    shell_defer_prompt();
-    tasker_enqueue(handle_who, NULL, 0);
+    handle_who(NULL);
 }
 
 /* UART Interrupt Callbacks -------------------------------------------------*/
@@ -711,7 +535,6 @@ void cmd_who(int argc, char **argv)
 void shell_uart_receive_callback(void)
 {
     /* Enqueue received byte and do all parsing/printing in main with shell_task() */
-    lowpower_note_activity();
     shell_rx_enqueue(shell_rx_char);
     HAL_UART_Receive_IT(&huart1, &shell_rx_char, 1);
 }

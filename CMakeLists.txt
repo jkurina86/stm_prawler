@@ -51,15 +51,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/tasker.c
     Core/Src/task_handlers.c
     Core/Src/sd_spi.c
-    Core/Src/ctd.c
-    Core/Src/optode.c
     Core/Src/LI8x0.c
-    Core/Src/wetlab.c
-    Core/Src/recorder.c
-    Core/Src/sensors.c
+    Core/Src/licor_shell.c
     Core/Src/config.c
-    Core/Src/wifi.c
-    Core/Src/realtime_comm.c
 )
 
 # Add include paths

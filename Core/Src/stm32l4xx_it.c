@@ -23,9 +23,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "shell.h"
-#include "ctd.h"
-#include "optode.h"
-#include "wifi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -371,24 +368,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
         shell_uart_receive_callback();
-    else if (huart->Instance == UART4)
-        wifi_notify_rx_cplt();
-}
-
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart->Instance == USART3)
-        ctd_notify_tx_cplt();
-    else if (huart->Instance == USART2)
-        optode_notify_tx_cplt();
-}
-
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
-{
-    if (huart->Instance == USART3)
-        ctd_notify_rx_event(Size);
-    else if (huart->Instance == USART2)
-        optode_notify_rx_event(Size);
 }
 
 /* USER CODE END 1 */

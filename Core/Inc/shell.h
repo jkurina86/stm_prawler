@@ -27,7 +27,7 @@ typedef struct {
 } shell_command_t;
 
 /* Exported constants --------------------------------------------------------*/
-#define SHELL_MAX_CMD_LEN       64
+#define SHELL_MAX_CMD_LEN       192
 #define SHELL_MAX_ARGS          8
 #define SHELL_PROMPT            "shell> "
 
@@ -50,17 +50,12 @@ void shell_printf(const char *format, ...);
 void shell_task(void);
 bool shell_dispatch(char *cmd_line);
 void shell_uart_receive_callback(void);
-void shell_defer_prompt(void);
 void shell_resume_rx(void);
 
 /* Command functions */
 void cmd_help(int argc, char **argv);
 void cmd_clear(int argc, char **argv);
 void cmd_status(int argc, char **argv);
-void cmd_lowpower(int argc, char **argv);
-void cmd_stayawake(int argc, char **argv);
-void cmd_debug_mode(int argc, char **argv);
-void cmd_lowpower_timer(int argc, char **argv);
 void cmd_pb8(int argc, char **argv);
 void cmd_version(int argc, char **argv);
 /* RTC Command functions */
@@ -73,33 +68,6 @@ void cmd_rtc_timer_set(int argc, char **argv);
 void cmd_rtc_timer_stop(int argc, char **argv);
 void cmd_rtc_timer_status(int argc, char **argv);
 
-/* CTD Command functions */
-void cmd_ctd(int argc, char **argv);
-void cmd_ctd_raw(int argc, char **argv);
-
-/* Optode Command functions */
-void cmd_optode(int argc, char **argv);
-void cmd_optode_raw(int argc, char **argv);
-void cmd_optode_listen(int argc, char **argv);
-
-/* WetLab Command functions */
-void cmd_wetlab(int argc, char **argv);
-void cmd_wetlab_raw(int argc, char **argv);
-
-/* Simultaneous sampling */
-void cmd_sensors(int argc, char **argv);
-
-/* Config */
-void cmd_config(int argc, char **argv);
-void cmd_samplerate(int argc, char **argv);
-
-/* WiFi */
-void cmd_wifi_status(int argc, char **argv);
-void cmd_wifi_up(int argc, char **argv);
-void cmd_wifi_down(int argc, char **argv);
-
-/* Realtime */
-void cmd_idata(int argc, char **argv);
 void cmd_who(int argc, char **argv);
 
 /* File System Command functions */

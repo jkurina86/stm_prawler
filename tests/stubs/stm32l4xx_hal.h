@@ -18,6 +18,7 @@ typedef struct {
     uint32_t ErrorCode;
 } UART_HandleTypeDef;
 
+#define HAL_MAX_DELAY UINT32_MAX
 #define DMA_NORMAL 0U
 #define DMA_CIRCULAR 1U
 #define DMA_PERIPH_TO_MEMORY 0U
@@ -45,6 +46,7 @@ typedef struct {
 HAL_StatusTypeDef HAL_UART_Receive_DMA(UART_HandleTypeDef *, uint8_t *, uint16_t);
 HAL_StatusTypeDef HAL_UART_Transmit(UART_HandleTypeDef *, const uint8_t *, uint16_t, uint32_t);
 HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef *);
+HAL_StatusTypeDef HAL_UART_Receive_IT(UART_HandleTypeDef *, uint8_t *, uint16_t);
 uint32_t HAL_GetTick(void);
 void HAL_Delay(uint32_t);
 #endif

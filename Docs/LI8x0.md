@@ -11,24 +11,58 @@ fields), 2-10 (calibration constants), and A-1 (9600 baud, 8N1, no flow control)
 LI-820/840 model tags and capability distinctions follow the reference driver;
 those models still need hardware verification.
 
-## Integration boundary
+## Branch integration and shell commands
 
-The source is added to the firmware CMake target. It is deliberately **not bound
-or called at boot**, and existing sensors, recording formats, GPIOs and low-power
-sequences are unchanged. All configured UARTs already have owners:
+This branch runs the UART shell on USART1 (`huart1`) and LI-COR on USART2
+(`huart2`, PA2/PA3), both at 9600 baud, 8N1. PB1 enables the USART2 RS-232
+transceiver. USART3, UART4 and UART5 are not initialized, and their transceivers
+remain disabled. The driver is bound with an unknown model at boot; initialization
+sends no instrument commands. The instrument must be powered and warmed up externally.
 
-| UART | Current owner | Source |
-|---|---|---|
-| USART1 | Shell | `Core/Src/shell.c` |
-| USART2 | Optode | `Core/Src/main.c`, Optode initialization |
-| USART3 | CTD | `Core/Src/main.c`, CTD initialization |
-| UART4 | Wi-Fi/truck communications | `Core/Src/wifi.c`, `lowpower.c` |
-| UART5 | WetLab | `Core/Src/main.c`, WetLab initialization |
+SD/FatFS and the external RTC remain available through their existing commands.
+The firmware stays awake for shell work. Recorder, legacy sensors, WiFi and
+realtime streaming sources are excluded from the firmware target. Their commands,
+profile configuration, sample-rate controls and inactive sleep controls are removed.
 
-Choose the hardware port and any sensor replacement before application integration.
-The application also owns sensor power, RS-232 transceiver enable, warm-up time,
-watchdog servicing, and stop-mode restoration. Initializing this driver does not
-power the instrument, initialize a UART, or imply that measurements are arriving.
+Start with:
+
+```text
+licor-discover
+licor-configure
+licor-info
+licor
+```
+
+If the model is known, `licor-model 830` (or 820/840/850) selects it without sending
+a discovery request. Other instrument commands discover automatically if the model
+is still unknown. Output configuration is explicit; sampling does not silently
+change instrument settings.
+
+| Command | Behavior |
+|---|---|
+| `licor` | Print one measurement, with only the fields actually reported |
+| `licor-raw` | Request one measurement and print its complete XML |
+| `licor-info` | Read model, instrument serial number and firmware version |
+| `licor-discover` | Send the driver's `<who>` discovery request |
+| `licor-model [820\|830\|840\|850]` | Show/select the protocol model locally |
+| `licor-configure` | Select polled XML measurement output |
+| `licor-query [section]` | Print a top-level XML section, or full state if omitted |
+| `licor-set section field [subfield] value` | Set one scalar field and require an ACK |
+| `licor-heater on\|off` | Set the heater and require an ACK |
+| `licor-resync [milliseconds]` | Drain RX after recovery, with optional 0-5000 ms settling |
+
+Examples: `licor-query cal`, `licor-query cfg`, `licor-set cfg pcomp TRUE`,
+`licor-set rs232 raw co2 TRUE`. Field names and values are single shell tokens;
+XML markup is rejected. Replies are printed in full, without the shell printf
+buffer's 256-byte truncation. `who` reports the board serial number (`PW002`),
+while `licor-info` reports the instrument identity.
+
+Commands execute in foreground shell context; no driver calls or printing occur
+in the UART ISR. Errors are named and reported to the shell. Failed transactions
+are never automatically retried or resynchronized: wait until the prior operation
+has ended, or reset the instrument, then explicitly run `licor-resync`. Model
+selection does not clear a synchronization fault. A timeout on a setting does not
+prove that the instrument left the setting unchanged.
 
 ## UART contract
 
@@ -142,7 +176,8 @@ Compilation uses warnings as errors and keeps assertions active in optimized
 builds. The new source also supports a syntax-only check against the repository's
 real STM32 HAL/CMSIS headers.
 
-The firmware preset cannot currently configure on this host because Ninja is
-missing; `arm-none-eabi-gcc` is also absent from PATH. Full ARM build/link,
-flash-size verification and physical instrument testing remain unverified.
-No flashing is performed by the host tests.
+The shell integration suite also checks USART2 transport ownership, command
+registration/removal, retained SD/RTC commands, automatic discovery, measurement
+validity masks, complete XML output, nested settings, input validation and explicit
+recovery after a timeout. Hardware communication and physical timing still require
+a connected instrument; these tests never flash the board.
