@@ -358,11 +358,25 @@ void wifi_down(void)
 
 uint16_t wifi_write(const uint8_t *data, uint16_t len)
 {
-    if (state != WIFI_STATE_STREAMING)
+    if (state != WIFI_STATE_STREAMING || data == NULL || len == 0U)
         return 0;
-    HAL_StatusTypeDef status = HAL_UART_Transmit(wifi_huart, data, len,
-                                                  HAL_MAX_DELAY);
-    return (status == HAL_OK) ? len : 0;
+
+    uint16_t sent = 0;
+    HAL_IWDG_Refresh(&hiwdg);
+    while (sent < len) {
+        uint16_t chunk = len - sent;
+        if (chunk > 512U)
+            chunk = 512U;
+
+        if (HAL_UART_Transmit(wifi_huart, data + sent, chunk,
+                              HAL_MAX_DELAY) != HAL_OK)
+            return 0;
+
+        /* About 0.53 s per full chunk at 9600 baud. No inter-chunk delay. */
+        HAL_IWDG_Refresh(&hiwdg);
+        sent += chunk;
+    }
+    return len;
 }
 
 void wifi_printf(const char *format, ...)
