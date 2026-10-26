@@ -45,10 +45,12 @@ extern "C" {
 #define OPTODE_RX_BUF_SIZE          2048
 #define WIFI_PRINTF_BUF_SIZE         256
 
-/* Number of idata measurements per recording session */
+/* Number of idata measurements per recording session.
+ * IDATA_CFG_ALL is the most full-width rows (49 B) that fit in the 32 KB
+ * RAM2 frame buffer: 27 B header + 668 x 49 B rows = 32,759 B. */
 #define IDATA_CTD_ONLY     315
 #define IDATA_CTD_OPTODE   205
-#define IDATA_CFG_ALL      500
+#define IDATA_CFG_ALL      668
 
 /* Total number of measurements per recording session */
 #define MEASUREMENTS_CTD_ONLY     315

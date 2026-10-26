@@ -291,7 +291,9 @@ static void MX_IWDG_Init(void)
   hiwdg.Instance = IWDG;
   hiwdg.Init.Prescaler = IWDG_PRESCALER_256;
   hiwdg.Init.Window = 4095;
-  hiwdg.Init.Reload = 3750;
+  /* 60 s: LSI 32 kHz / 256 = 125 Hz; 7500 / 125 = 60 s. Must exceed the
+   * blocking realtime CSV stream (~35 s at 9600 baud for 680 rows). */
+  hiwdg.Init.Reload = 7500;
   if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
   {
     Error_Handler();

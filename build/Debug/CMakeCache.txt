@@ -226,6 +226,15 @@ CMAKE_TOOLCHAIN_FILE:UNINITIALIZED=C:/Users/kurina/Projects/stm_prawler/cmake/gc
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
+//SEGGER J-Link target device
+JLINK_DEVICE:STRING=STM32L476RG
+
+//SEGGER J-Link debug interface
+JLINK_INTERFACE:STRING=SWD
+
+//SEGGER J-Link interface speed in kHz
+JLINK_SPEED:STRING=4000
+
 //Value Computed by CMake
 stm-prawler_BINARY_DIR:STATIC=C:/Users/kurina/Projects/stm_prawler/build/Debug
 
