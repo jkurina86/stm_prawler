@@ -19,7 +19,8 @@
 /* Private defines -----------------------------------------------------------*/
 #define RT_CFG_ALL_HEADER_BYTES  27U
 #define RT_CFG_ALL_ROW_BYTES     49U
-#define RT_BUF_SIZE              (RT_CFG_ALL_HEADER_BYTES + (IDATA_CFG_ALL * RT_CFG_ALL_ROW_BYTES))
+/* Include snprintf's terminating NUL; it is not part of the transmitted data. */
+#define RT_BUF_SIZE              (RT_CFG_ALL_HEADER_BYTES + (IDATA_CFG_ALL * RT_CFG_ALL_ROW_BYTES) + 1U)
 #define RT_LEN_ASCII_LEN     4U
 
 /* Private variables ---------------------------------------------------------*/
