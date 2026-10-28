@@ -109,12 +109,12 @@ static bool wetlab_parse(const char *line, wetlab_data_t *out)
 }
 
 /**
- * @brief  Find the last complete data row in the buffer.
- * @return Pointer to the start of the line, or NULL.
+ * @brief  Parse the last valid complete data row in the buffer.
+ * @return true if a valid row was found; leaves out unchanged otherwise.
  */
-static char *wetlab_find_last_row(void)
+static bool wetlab_parse_last_valid_row(wetlab_data_t *out)
 {
-    char *last = NULL;
+    bool found = false;
     char *p = (char *)rx_buf;
 
     while (*p) {
@@ -138,13 +138,15 @@ static char *wetlab_find_last_row(void)
 
         *eol = '\0';
 
-        if (*p >= '0' && *p <= '9') {
-            last = p;
+        wetlab_data_t candidate;
+        if (*p >= '0' && *p <= '9' && wetlab_parse(p, &candidate)) {
+            *out = candidate;
+            found = true;
         }
 
         p = eol + 1;
     }
-    return last;
+    return found;
 }
 
 /* Public functions ----------------------------------------------------------*/
@@ -173,11 +175,7 @@ bool wetlab_sample(wetlab_data_t *out)
     if (total == 0)
         return false;
 
-    char *line = wetlab_find_last_row();
-    if (!line)
-        return false;
-
-    return wetlab_parse(line, out);
+    return wetlab_parse_last_valid_row(out);
 }
 
 void wetlab_raw(void)
@@ -223,9 +221,5 @@ bool wetlab_collect(wetlab_data_t *out)
     if (total == 0)
         return false;
 
-    char *line = wetlab_find_last_row();
-    if (!line)
-        return false;
-
-    return wetlab_parse(line, out);
+    return wetlab_parse_last_valid_row(out);
 }
